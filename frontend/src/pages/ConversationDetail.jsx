@@ -283,15 +283,20 @@ export default function ConversationDetail() {
 // ═══════════════════════════════════════════════════════
 // BULK REASSIGNMENT MODAL
 // ═══════════════════════════════════════════════════════
-export function BulkReassignModal({ conversationId, linkedEntities, contacts, onClose, onComplete, onSwitchTab }) {
+export function BulkReassignModal({
+  conversationId, linkedEntities, contacts, onClose, onComplete, onSwitchTab,
+  searchContactsFn = api.searchContacts,
+  bulkReassignFn = api.bulkReassign,
+  initialPreview, initialResult,
+}) {
   const [fromEntityId, setFromEntityId] = useState('');
   const [toEntityId, setToEntityId] = useState('');
   const [scope, setScope] = useState('all');
   const [toSearch, setToSearch] = useState('');
   const [toResults, setToResults] = useState([]);
-  const [preview, setPreview] = useState(null);
+  const [preview, setPreview] = useState(initialPreview || null);
   const [executing, setExecuting] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(initialResult || null);
   const [error, setError] = useState(null);
   const [nameOverride, setNameOverride] = useState('');
 
@@ -299,7 +304,7 @@ export function BulkReassignModal({ conversationId, linkedEntities, contacts, on
     setToSearch(q);
     if (q.length < 2) { setToResults([]); return; }
     try {
-      const r = await api.searchContacts(q, 10);
+      const r = await searchContactsFn(q, 10);
       setToResults(r);
     } catch {
       setToResults(contacts.filter(c => c.canonical_name.toLowerCase().includes(q.toLowerCase())).slice(0, 10));
@@ -310,7 +315,7 @@ export function BulkReassignModal({ conversationId, linkedEntities, contacts, on
     if (!fromEntityId || !toEntityId) return;
     setError(null);
     try {
-      const p = await api.bulkReassign(conversationId, fromEntityId, toEntityId, scope, true);
+      const p = await bulkReassignFn(conversationId, fromEntityId, toEntityId, scope, true);
       setPreview(p);
     } catch (e) {
       setError(e.message);
@@ -322,7 +327,7 @@ export function BulkReassignModal({ conversationId, linkedEntities, contacts, on
     setExecuting(true);
     setError(null);
     try {
-      const r = await api.bulkReassign(conversationId, fromEntityId, toEntityId, scope, false);
+      const r = await bulkReassignFn(conversationId, fromEntityId, toEntityId, scope, false);
       setResult(r);
     } catch (e) {
       setError(e.message);
@@ -1982,9 +1987,16 @@ export function RawTab({ extraction }) {
 }
 
 
-export function RelationalReferencesBanner({ conversationId, contacts, onResolved }) {
-  const [claims, setClaims] = useState([]);
-  const [loading, setLoading] = useState(true);
+export function RelationalReferencesBanner({
+  conversationId, contacts, onResolved,
+  initialClaims,
+  loadRelationalClaimsFn = api.unresolvedRelational,
+  searchContactsFn = api.searchContacts,
+  linkEntityFn = api.linkEntity,
+  saveRelationshipFn = api.saveRelationship,
+}) {
+  const [claims, setClaims] = useState(initialClaims || []);
+  const [loading, setLoading] = useState(!initialClaims);
   const [linkingId, setLinkingId] = useState(null);
   const [linkSearch, setLinkSearch] = useState('');
   const [linkResults, setLinkResults] = useState([]);
@@ -1995,17 +2007,18 @@ export function RelationalReferencesBanner({ conversationId, contacts, onResolve
   const [anchorResults, setAnchorResults] = useState([]);
 
   useEffect(() => {
-    api.unresolvedRelational(conversationId, 30)
+    if (initialClaims) return;
+    loadRelationalClaimsFn(conversationId, 30)
       .then(d => setClaims(d.relational_claims || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [conversationId]);
+  }, [conversationId, initialClaims, loadRelationalClaimsFn]);
 
   const handleSearch = async (q) => {
     setLinkSearch(q);
     if (q.length < 2) { setLinkResults([]); return; }
     try {
-      const results = await api.searchContacts(q, 10);
+      const results = await searchContactsFn(q, 10);
       setLinkResults(results.filter(c => c.is_confirmed !== 0));
     } catch { setLinkResults([]); }
   };
@@ -2014,7 +2027,7 @@ export function RelationalReferencesBanner({ conversationId, contacts, onResolve
     try {
       const contact = contacts.find(c => c.id === contactId) || linkResults.find(c => c.id === contactId);
       const contactName = contact ? contact.canonical_name : '';
-      const result = await api.linkEntity(conversationId, claim.id, contactId, claim.subject_name, null);
+      const result = await linkEntityFn(conversationId, claim.id, contactId, claim.subject_name, null);
 
       // Track linked people for this claim
       setLinkedPeople(prev => ({
@@ -2055,7 +2068,7 @@ export function RelationalReferencesBanner({ conversationId, contacts, onResolve
       const targets = relPrompt.targets || [{ id: relPrompt.targetId, name: relPrompt.targetName }];
       // Save one relationship per target (multi-target support, Bug 10)
       for (const target of targets) {
-        await api.saveRelationship(
+        await saveRelationshipFn(
           relPrompt.anchorId, relPrompt.relationship.trim(),
           target.id, target.name
         );
@@ -2143,7 +2156,7 @@ export function RelationalReferencesBanner({ conversationId, contacts, onResolve
                     setRelPrompt(p => ({ ...p, targetSearch: q }));
                     if (q.length >= 2) {
                       try {
-                        const results = await api.searchContacts(q, 8);
+                        const results = await searchContactsFn(q, 8);
                         setRelPrompt(p => ({ ...p, targetResults: results }));
                       } catch {}
                     }
@@ -2238,7 +2251,7 @@ export function RelationalReferencesBanner({ conversationId, contacts, onResolve
                         setAnchorSearch(e.target.value);
                         if (e.target.value.length >= 2) {
                           try {
-                            const r = await api.searchContacts(e.target.value, 8);
+                            const r = await searchContactsFn(e.target.value, 8);
                             setAnchorResults(r);
                           } catch {}
                         } else { setAnchorResults([]); }
@@ -2336,9 +2349,21 @@ export function RelationalReferencesBanner({ conversationId, contacts, onResolve
 }
 
 
-export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeopleLoaded }) {
-  const [people, setPeople] = useState([]);
-  const [loading, setLoading] = useState(true);
+export function PeopleReviewBanner({
+  conversationId, contacts, onResolved, onPeopleLoaded,
+  initialPeople,
+  loadPeopleFn = api.conversationPeople,
+  confirmPersonFn = api.confirmPerson,
+  skipPersonFn = api.skipPerson,
+  unskipPersonFn = api.unskipPerson,
+  dismissPersonFn = api.dismissPerson,
+  searchContactsFn = api.searchContacts,
+  linkProvisionalFn = api.linkProvisional,
+  dismissProvisionalFn = api.dismissProvisional,
+  confirmProvisionalFn = api.confirmProvisional,
+}) {
+  const [people, setPeople] = useState(initialPeople || []);
+  const [loading, setLoading] = useState(!initialPeople);
   const [expanded, setExpanded] = useState(false);
   const [linkingName, setLinkingName] = useState(null);
   const [linkSearch, setLinkSearch] = useState('');
@@ -2348,7 +2373,8 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
   const [actionLoading, setActionLoading] = useState(null);
 
   const fetchPeople = useCallback(() => {
-    api.conversationPeople(conversationId)
+    if (initialPeople) return;
+    loadPeopleFn(conversationId)
       .then(d => {
         const ppl = d.people || [];
         setPeople(ppl);
@@ -2377,7 +2403,7 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
   const handleConfirm = async (person) => {
     setActionLoading(person.original_name);
     try {
-      await api.confirmPerson(conversationId, person.original_name, person.entity_id);
+      await confirmPersonFn(conversationId, person.original_name, person.entity_id);
       fetchPeople();
       if (onResolved) onResolved();
     } catch (e) { console.error('Confirm failed', e); }
@@ -2387,7 +2413,7 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
   const handleSkip = async (person) => {
     setActionLoading(person.original_name);
     try {
-      await api.skipPerson(conversationId, person.original_name, person.entity_id || null);
+      await skipPersonFn(conversationId, person.original_name, person.entity_id || null);
       fetchPeople();
       if (onResolved) onResolved();
     } catch (e) { console.error('Skip failed', e); }
@@ -2397,7 +2423,7 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
   const handleUnskip = async (person) => {
     setActionLoading(person.original_name);
     try {
-      await api.unskipPerson(conversationId, person.original_name, person.entity_id || null);
+      await unskipPersonFn(conversationId, person.original_name, person.entity_id || null);
       fetchPeople();
       if (onResolved) onResolved();
     } catch (e) { console.error('Unskip failed', e); }
@@ -2407,7 +2433,7 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
   const handleDismissPerson = async (person) => {
     setActionLoading(person.original_name);
     try {
-      await api.dismissPerson(conversationId, person.original_name, person.entity_id || null);
+      await dismissPersonFn(conversationId, person.original_name, person.entity_id || null);
       fetchPeople();
       if (onResolved) onResolved();
     } catch (e) { console.error('Dismiss person failed', e); }
@@ -2418,7 +2444,7 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
     setLinkSearch(q);
     if (q.length < 2) { setLinkResults([]); return; }
     try {
-      const results = await api.searchContacts(q, 10);
+      const results = await searchContactsFn(q, 10);
       setLinkResults(results.filter(c => c.is_confirmed !== 0));
     } catch { setLinkResults([]); }
   };
@@ -2427,10 +2453,10 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
     setActionLoading(person.original_name);
     try {
       if (person.entity_id && person.is_provisional) {
-        await api.linkProvisional(person.entity_id, targetId);
+        await linkProvisionalFn(person.entity_id, targetId);
       } else {
         // For auto_resolved "change" action, use confirm-person with new entity
-        await api.confirmPerson(conversationId, person.original_name, targetId);
+        await confirmPersonFn(conversationId, person.original_name, targetId);
       }
       setLinkingName(null);
       setLinkSearch('');
@@ -2445,7 +2471,7 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
     if (!person.entity_id) return;
     setActionLoading(person.original_name);
     try {
-      await api.dismissProvisional(person.entity_id);
+      await dismissProvisionalFn(person.entity_id);
       fetchPeople();
       if (onResolved) onResolved();
     } catch (e) { console.error('Dismiss failed', e); }
@@ -2466,7 +2492,7 @@ export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeo
     if (!person.entity_id) return;
     setActionLoading(person.original_name);
     try {
-      await api.confirmProvisional(
+      await confirmProvisionalFn(
         person.entity_id,
         editForm.name || null,
         false,
