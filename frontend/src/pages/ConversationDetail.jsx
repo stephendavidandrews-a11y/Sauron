@@ -2630,9 +2630,9 @@ export function PeopleReviewBanner({
                     {person.status}
                   </span>
                 )}
-                {person.claim_count > 0 && !isGreen && (
+                {(person.claim_count > 0 && !isGreen || person.unlinked_claim_count > 0) && (
                   <span style={{ color: C.textDim, fontSize: 11 }}>
-                    ({person.claim_count} claim{person.claim_count !== 1 ? 's' : ''})
+                    ({person.claim_count} claim{person.claim_count !== 1 ? 's' : ''}{person.unlinked_claim_count > 0 ? `, ${person.unlinked_claim_count} unlinked` : ''})
                   </span>
                 )}
               </div>

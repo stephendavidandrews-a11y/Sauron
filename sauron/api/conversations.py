@@ -997,6 +997,32 @@ def list_conversation_people(conversation_id: str):
             if sel["link_source"]:
                 people_map[key]["link_sources"].add(sel["link_source"])
 
+        # ── Consolidate: merge unresolved into matching resolved person ──
+        # If "unresolved:daniel park" exists AND a resolved entity has
+        # canonical_name "Daniel Park" (case-insensitive), merge claims into
+        # the resolved entry. Display-only — no DB mutation.
+        resolved_by_name = {}  # lowered canonical_name -> key
+        for key, data in people_map.items():
+            if data["entity_id"] and data["canonical_name"]:
+                resolved_by_name[data["canonical_name"].strip().lower()] = key
+
+        unresolved_keys = [k for k in people_map if k.startswith("unresolved:")]
+        for ukey in unresolved_keys:
+            udata = people_map[ukey]
+            # Check each original_name against resolved canonical names
+            for uname in list(udata["original_names"]):
+                match_key = resolved_by_name.get(uname.strip().lower())
+                if match_key and match_key in people_map:
+                    # Merge into resolved entry
+                    rdata = people_map[match_key]
+                    rdata["original_names"] |= udata["original_names"]
+                    rdata["subject_claim_count"] += udata["subject_claim_count"]
+                    rdata["unlinked_claim_count"] = rdata.get("unlinked_claim_count", 0) + udata["subject_claim_count"]
+                    rdata["roles"] |= udata["roles"]
+                    rdata["link_sources"] |= udata["link_sources"]
+                    del people_map[ukey]
+                    break  # This unresolved key is consumed
+
         # ── Build response ──
         people = []
         for key, data in people_map.items():
@@ -1027,6 +1053,7 @@ def list_conversation_people(conversation_id: str):
                 "is_self": entity_id == SELF_ENTITY_ID,
                 "is_provisional": is_confirmed == 0 if entity_id else False,
                 "claim_count": data["subject_claim_count"],
+                "unlinked_claim_count": data.get("unlinked_claim_count", 0),
                 "roles": sorted(data["roles"]),
                 "link_sources": sorted(data["link_sources"]),
             })
