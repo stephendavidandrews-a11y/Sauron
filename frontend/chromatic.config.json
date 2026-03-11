@@ -1,0 +1,7 @@
+{
+  "buildScriptName": "build-storybook",
+  "exitZeroOnChanges": true,
+  "externals": [
+    "src/index.css"
+  ]
+}
