@@ -787,6 +787,8 @@ function DuplicateContactBanner() {
   if (!dupData || dismissed) return null;
 
   const handleResolve = async () => {
+    const groups = dupData.groups.map(g => g.contacts[0]?.canonical_name + ' (' + g.sauron_count + ' rows)').join(', ');
+    if (!window.confirm('Merge duplicate contacts?\n\nGroups: ' + groups + '\n\nThis cannot be undone.')) return;
     setResolving(true);
     try {
       const result = await api.resolveDuplicateContacts();

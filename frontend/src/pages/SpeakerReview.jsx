@@ -267,7 +267,7 @@ export default function SpeakerReview() {
     if (searchQuery.length < 2) { setFilteredContacts([]); return; }
     const timer = setTimeout(() => {
       api.searchContacts(searchQuery, 10)
-        .then(data => setFilteredContacts(data?.contacts || data || []))
+        .then(data => { const all = data?.contacts || data || []; setFilteredContacts(all.filter(c => c.is_confirmed !== 0)); })
         .catch(() => setFilteredContacts([]));
     }, 200);
     return () => clearTimeout(timer);

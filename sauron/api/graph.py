@@ -843,16 +843,40 @@ def _validate_networking_app_contact(networking_app_contact_id: str) -> dict:
         }
 
 
+
 @router.post("/resolve-duplicates")
 def resolve_duplicate_contacts():
     """Auto-resolve duplicate unified_contacts by merging into one row per networking_app_contact_id.
 
-    Strategy: keep the best row (is_confirmed=1 preferred, non-conversation-sourced preferred,
-    oldest created_at) and delete extras. Merges aliases from deleted rows into the keeper.
-    Re-points all foreign key references (claims, transcripts, graph edges) to the keeper.
+    Strategy:
+    1. Pick the "best" keeper row: is_confirmed=1 preferred, non-conversation-sourced
+       preferred, oldest created_at as tiebreaker.
+    2. Merge scalar fields: email, phone, relationships, voice_profile_id, calendar_aliases
+       are copied from dupes to keeper where keeper's value is NULL.
+    3. Merge aliases via set union.
+    4. Re-point ALL foreign key references across all tables to the keeper ID.
+    5. Handle claim_entities UNIQUE(claim_id, entity_id, role) constraint by deleting
+       dupe rows that would collide before re-pointing.
+    6. Log a before/after snapshot for each group to a merge_audit_log table.
+    7. Delete the duplicate unified_contacts rows.
+
+    The entire operation runs in one transaction — any error rolls back all changes.
     """
     conn = get_connection()
     try:
+        # Ensure audit log table exists
+        conn.execute("""CREATE TABLE IF NOT EXISTS merge_audit_log (
+            id TEXT PRIMARY KEY,
+            networking_app_contact_id TEXT NOT NULL,
+            keeper_id TEXT NOT NULL,
+            keeper_name TEXT,
+            removed_ids TEXT,
+            removed_names TEXT,
+            fields_merged TEXT,
+            fk_updates TEXT,
+            created_at DATETIME DEFAULT (datetime('now'))
+        )""")
+
         dup_groups = conn.execute(
             """SELECT networking_app_contact_id
                FROM unified_contacts
@@ -870,8 +894,9 @@ def resolve_duplicate_contacts():
         for dg in dup_groups:
             naid = dg["networking_app_contact_id"]
             rows = conn.execute(
-                """SELECT id, canonical_name, aliases, is_confirmed,
-                       source_conversation_id, created_at
+                """SELECT id, canonical_name, aliases, email, phone_number,
+                       relationships, voice_profile_id, calendar_aliases,
+                       is_confirmed, source_conversation_id, created_at
                    FROM unified_contacts
                    WHERE networking_app_contact_id = ?
                    ORDER BY is_confirmed DESC,
@@ -886,44 +911,209 @@ def resolve_duplicate_contacts():
             keeper = dict(rows[0])
             dupes = [dict(r) for r in rows[1:]]
 
-            # Merge aliases from dupes into keeper
+            # ── Merge scalar fields (null-fill from dupes) ──
+            scalar_fields = ["email", "phone_number", "relationships",
+                             "voice_profile_id", "calendar_aliases"]
+            fields_merged = []
+            for field in scalar_fields:
+                if not keeper.get(field):
+                    for dupe in dupes:
+                        if dupe.get(field):
+                            keeper[field] = dupe[field]
+                            fields_merged.append(f"{field}={dupe[field]!r} (from {dupe['id'][:8]})")
+                            break
+
+            # ── Merge aliases via set union ──
             all_aliases = set()
             for alias_str in [keeper.get("aliases") or ""] + [d.get("aliases") or "" for d in dupes]:
                 for a in alias_str.split(";"):
                     a = a.strip()
                     if a:
                         all_aliases.add(a)
-
             merged_aliases = "; ".join(sorted(all_aliases)) if all_aliases else None
 
+            # ── Update keeper row with merged data ──
             conn.execute(
-                "UPDATE unified_contacts SET aliases = ? WHERE id = ?",
-                (merged_aliases, keeper["id"]),
+                """UPDATE unified_contacts
+                   SET aliases = ?, email = ?, phone_number = ?,
+                       relationships = ?, voice_profile_id = ?,
+                       calendar_aliases = ?
+                   WHERE id = ?""",
+                (merged_aliases, keeper.get("email"), keeper.get("phone_number"),
+                 keeper.get("relationships"), keeper.get("voice_profile_id"),
+                 keeper.get("calendar_aliases"), keeper["id"]),
             )
 
-            # Re-point foreign key references from dupes to keeper
+            # ── Re-point ALL foreign key references ──
+            fk_updates = {}
             for dupe in dupes:
-                conn.execute(
+                did = dupe["id"]
+                kid = keeper["id"]
+
+                # --- Handle claim_entities UNIQUE constraint ---
+                # Find claim_entities rows on dupe that would collide with keeper
+                collisions = conn.execute(
+                    """SELECT ce_dupe.id
+                       FROM claim_entities ce_dupe
+                       JOIN claim_entities ce_keep
+                         ON ce_dupe.claim_id = ce_keep.claim_id
+                        AND ce_dupe.role = ce_keep.role
+                       WHERE ce_dupe.entity_id = ?
+                         AND ce_keep.entity_id = ?""",
+                    (did, kid),
+                ).fetchall()
+                for col in collisions:
+                    conn.execute("DELETE FROM claim_entities WHERE id = ?", (col["id"],))
+                    fk_updates["claim_entities_collision_deleted"] = \
+                        fk_updates.get("claim_entities_collision_deleted", 0) + 1
+
+                # Table: event_claims.subject_entity_id
+                r = conn.execute(
                     "UPDATE event_claims SET subject_entity_id = ? WHERE subject_entity_id = ?",
-                    (keeper["id"], dupe["id"]),
-                )
-                conn.execute(
+                    (kid, did))
+                if r.rowcount: fk_updates["event_claims.subject_entity_id"] = \
+                    fk_updates.get("event_claims.subject_entity_id", 0) + r.rowcount
+
+                # Table: event_claims.speaker_id
+                r = conn.execute(
+                    "UPDATE event_claims SET speaker_id = ? WHERE speaker_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["event_claims.speaker_id"] = \
+                    fk_updates.get("event_claims.speaker_id", 0) + r.rowcount
+
+                # Table: claim_entities.entity_id
+                r = conn.execute(
                     "UPDATE claim_entities SET entity_id = ? WHERE entity_id = ?",
-                    (keeper["id"], dupe["id"]),
-                )
-                conn.execute(
+                    (kid, did))
+                if r.rowcount: fk_updates["claim_entities.entity_id"] = \
+                    fk_updates.get("claim_entities.entity_id", 0) + r.rowcount
+
+                # Table: transcripts.speaker_id
+                r = conn.execute(
                     "UPDATE transcripts SET speaker_id = ? WHERE speaker_id = ?",
-                    (keeper["id"], dupe["id"]),
-                )
-                conn.execute(
-                    "UPDATE graph_edges SET source_entity_id = ? WHERE source_entity_id = ?",
-                    (keeper["id"], dupe["id"]),
-                )
-                conn.execute(
-                    "UPDATE graph_edges SET target_entity_id = ? WHERE target_entity_id = ?",
-                    (keeper["id"], dupe["id"]),
-                )
-                conn.execute("DELETE FROM unified_contacts WHERE id = ?", (dupe["id"],))
+                    (kid, did))
+                if r.rowcount: fk_updates["transcripts.speaker_id"] = \
+                    fk_updates.get("transcripts.speaker_id", 0) + r.rowcount
+
+                # Table: graph_edges (correct column names: from_entity, to_entity)
+                r = conn.execute(
+                    "UPDATE graph_edges SET from_entity = ? WHERE from_entity = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["graph_edges.from_entity"] = \
+                    fk_updates.get("graph_edges.from_entity", 0) + r.rowcount
+                r = conn.execute(
+                    "UPDATE graph_edges SET to_entity = ? WHERE to_entity = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["graph_edges.to_entity"] = \
+                    fk_updates.get("graph_edges.to_entity", 0) + r.rowcount
+
+                # Table: synthesis_entity_links.resolved_entity_id
+                r = conn.execute(
+                    "UPDATE synthesis_entity_links SET resolved_entity_id = ? WHERE resolved_entity_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["synthesis_entity_links"] = \
+                    fk_updates.get("synthesis_entity_links", 0) + r.rowcount
+
+                # Table: transcript_annotations.resolved_contact_id
+                r = conn.execute(
+                    "UPDATE transcript_annotations SET resolved_contact_id = ? WHERE resolved_contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["transcript_annotations"] = \
+                    fk_updates.get("transcript_annotations", 0) + r.rowcount
+
+                # Table: voice_profiles.contact_id
+                r = conn.execute(
+                    "UPDATE voice_profiles SET contact_id = ? WHERE contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["voice_profiles"] = \
+                    fk_updates.get("voice_profiles", 0) + r.rowcount
+
+                # Table: embeddings.contact_id
+                r = conn.execute(
+                    "UPDATE embeddings SET contact_id = ? WHERE contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["embeddings"] = \
+                    fk_updates.get("embeddings", 0) + r.rowcount
+
+                # Table: beliefs.entity_id
+                r = conn.execute(
+                    "UPDATE beliefs SET entity_id = ? WHERE entity_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["beliefs"] = \
+                    fk_updates.get("beliefs", 0) + r.rowcount
+
+                # Table: meeting_intentions.target_contact_id
+                r = conn.execute(
+                    "UPDATE meeting_intentions SET target_contact_id = ? WHERE target_contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["meeting_intentions"] = \
+                    fk_updates.get("meeting_intentions", 0) + r.rowcount
+
+                # Table: routing_log.entity_id
+                r = conn.execute(
+                    "UPDATE routing_log SET entity_id = ? WHERE entity_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["routing_log"] = \
+                    fk_updates.get("routing_log", 0) + r.rowcount
+
+                # Table: opportunity_signals.target_contact_id
+                r = conn.execute(
+                    "UPDATE opportunity_signals SET target_contact_id = ? WHERE target_contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["opportunity_signals"] = \
+                    fk_updates.get("opportunity_signals", 0) + r.rowcount
+
+                # Table: ask_vectors.target_contact_id
+                r = conn.execute(
+                    "UPDATE ask_vectors SET target_contact_id = ? WHERE target_contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["ask_vectors"] = \
+                    fk_updates.get("ask_vectors", 0) + r.rowcount
+
+                # Table: policy_positions.contact_id
+                r = conn.execute(
+                    "UPDATE policy_positions SET contact_id = ? WHERE contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["policy_positions"] = \
+                    fk_updates.get("policy_positions", 0) + r.rowcount
+
+                # Table: contact_extraction_preferences.contact_id
+                r = conn.execute(
+                    "UPDATE contact_extraction_preferences SET contact_id = ? WHERE contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["contact_extraction_preferences"] = \
+                    fk_updates.get("contact_extraction_preferences", 0) + r.rowcount
+
+                # Table: vocal_baselines.contact_id
+                r = conn.execute(
+                    "UPDATE vocal_baselines SET contact_id = ? WHERE contact_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["vocal_baselines"] = \
+                    fk_updates.get("vocal_baselines", 0) + r.rowcount
+
+                # Table: vocal_features.speaker_id
+                r = conn.execute(
+                    "UPDATE vocal_features SET speaker_id = ? WHERE speaker_id = ?",
+                    (kid, did))
+                if r.rowcount: fk_updates["vocal_features"] = \
+                    fk_updates.get("vocal_features", 0) + r.rowcount
+
+                # Delete the duplicate row
+                conn.execute("DELETE FROM unified_contacts WHERE id = ?", (did,))
+
+            # ── Write audit log ──
+            audit_id = str(uuid.uuid4())
+            conn.execute(
+                """INSERT INTO merge_audit_log
+                   (id, networking_app_contact_id, keeper_id, keeper_name,
+                    removed_ids, removed_names, fields_merged, fk_updates)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (audit_id, naid, keeper["id"], keeper["canonical_name"],
+                 json.dumps([d["id"] for d in dupes]),
+                 json.dumps([d["canonical_name"] for d in dupes]),
+                 json.dumps(fields_merged),
+                 json.dumps(fk_updates)),
+            )
 
             resolved += 1
             details.append({
@@ -932,9 +1122,12 @@ def resolve_duplicate_contacts():
                 "kept_id": keeper["id"],
                 "removed_count": len(dupes),
                 "removed": [d["canonical_name"] for d in dupes],
+                "fields_merged": fields_merged,
+                "fk_updates": fk_updates,
             })
 
         conn.commit()
+        logger.info(f"Resolved {resolved} duplicate contact group(s)")
         return {
             "status": "resolved",
             "resolved": resolved,
