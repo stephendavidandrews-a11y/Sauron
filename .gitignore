@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# Data & Models (large files)
+data/
+models/
+backups/
+inbox/
+logs/
+
+# Frontend build artifacts & deps
+frontend/node_modules/
+frontend/dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.pid
+temp_*.py

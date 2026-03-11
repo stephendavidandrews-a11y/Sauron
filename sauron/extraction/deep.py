@@ -1,0 +1,320 @@
+"""Pass 3: Opus 4.6 Synthesis — deep reasoning from claims + vocal analysis.
+
+Receives: claims from Sonnet + vocal analysis with baseline comparisons +
+contact profiles + recent interaction history + existing beliefs.
+
+Produces: vocal intelligence, belief updates, self-coaching, graph edges,
+commitments (enriched), what-changed assessments. Does NOT extract claims —
+that's Sonnet's job (Pass 2).
+
+Cost: ~$0.13/conversation
+"""
+
+import json
+import logging
+
+import anthropic
+
+from sauron.config import EXTRACTION_MODEL
+from sauron.extraction.json_utils import extract_json
+from sauron.extraction.schemas import (
+    Claim,
+    ClaimsResult,
+    SoloExtractionResult,
+    SynthesisResult,
+    TriageResult,
+)
+
+logger = logging.getLogger(__name__)
+
+SYNTHESIS_SYSTEM_PROMPT = """You are Sauron, a personal intelligence synthesis engine for Stephen Andrews.
+
+You receive:
+1. Atomic claims extracted from a conversation (with evidence and confidence)
+2. Per-speaker vocal analysis with baseline comparisons
+3. Calendar context and triage classification
+4. Existing beliefs about the people in this conversation (if any)
+
+Your job is to SYNTHESIZE — not re-extract. The claims are already extracted.
+You correlate claims with vocal data, identify belief updates, provide coaching,
+and produce actionable intelligence.
+
+Output valid JSON matching this schema:
+{
+  "summary": "3-5 sentence synthesis of the conversation — what happened, what matters, what changed",
+  "relationship_notes": "Observation about relationship dynamics and trajectory",
+  "vocal_intelligence_summary": "Key vocal finding correlating words with voice data",
+  "word_voice_alignment": "aligned | misaligned | neutral",
+  "sentiment": "warm | neutral | transactional | tense | enthusiastic",
+  "relationship_delta": "strengthened | maintained | weakened | new",
+  "per_speaker_vocal_insights": {
+    "speaker_name": {
+      "emotional_state": "description with specific vocal evidence",
+      "rapport_assessment": "description",
+      "engagement_trend": "description with specific moments",
+      "communication_style_notes": "observed preferences and patterns",
+      "topics_of_passion": ["topics where vocal engagement was high"],
+      "topics_of_discomfort": ["topics with stress markers"]
+    }
+  },
+  "belief_updates": [
+    {
+      "entity_type": "person | topic | organization | relationship | self",
+      "entity_id": null,
+      "entity_name": "Name or topic",
+      "belief_key": "short_identifier_for_dedup",
+      "belief_summary": "Natural language belief statement",
+      "status": "active | provisional | refined | qualified | time_bounded | superseded | contested | stale",
+      "confidence": 0.0-1.0,
+      "evidence_role": "support | contradiction | refinement | qualification",
+      "supporting_claim_ids": ["claim_001", "claim_003"]
+    }
+  ],
+  "self_coaching": [
+    {
+      "observation": "What Stephen did well or could improve — be specific with vocal/behavioral evidence",
+      "recommendation": "Specific actionable suggestion"
+    }
+  ],
+  "graph_edges": [
+    {
+      "from_entity": "name or entity",
+      "from_type": "person | topic | organization",
+      "to_entity": "name or entity",
+      "to_type": "person | topic | organization",
+      "edge_type": "knows | works_with | reports_to | supports | opposes | interested_in | expert_on | etc",
+      "strength": 0.0-1.0
+    }
+  ],
+  "my_commitments": [
+    {
+      "description": "What Stephen committed to",
+      "original_words": "exact quote from claims evidence",
+      "resolved_date": "YYYY-MM-DD or null",
+      "confidence": 0.0-1.0,
+      "assignee": "Stephen",
+      "direction": "i_owe",
+      "source_claim_id": "claim_XXX"
+    }
+  ],
+  "contact_commitments": [
+    {
+      "description": "What they committed to",
+      "original_words": "exact quote",
+      "resolved_date": "YYYY-MM-DD or null",
+      "confidence": 0.0-1.0,
+      "assignee": "person name",
+      "direction": "they_owe",
+      "source_claim_id": "claim_XXX"
+    }
+  ],
+  "standing_offers": [{"contact_name": "...", "description": "...", "offered_by": "me|them", "original_words": "..."}],
+  "scheduling_leads": [{"contact_name": "...", "description": "...", "original_words": "...", "timeframe": "..."}],
+  "calendar_events": [{"title": "...", "suggested_date": "...", "attendees": ["..."]}],
+  "follow_ups": [{"description": "...", "priority": "high|medium|low", "due_date": "YYYY-MM-DD or null"}],
+  "policy_positions": [{"person": "...", "topic": "...", "position": "supports|opposes|undecided", "strength": 0.0-1.0, "notes": "..."}],
+  "topics_discussed": ["topic1", "topic2"],
+  "what_changed": {
+    "person_name": "Summary of what changed for this person since context indicates last interaction"
+  },
+  "context_classification": "confirmed or refined classification"
+}
+
+Key instructions:
+- BELIEVE THE CLAIMS. They are already extracted and evidence-linked. Build on them, don't re-extract.
+- For vocal analysis: correlate specific vocal deviations with specific claims/moments.
+- Word-voice misalignment: when claims say "fine/good" but vocal data shows jitter/stress spikes, flag it clearly.
+- Self-coaching: analyze Stephen's talk-time ratio, question frequency, interruption patterns. Be specific.
+- Belief updates: determine if existing beliefs should be supported, refined, qualified, contradicted, or if new beliefs emerge.
+- Commitments: ONLY from claims of type "commitment". Include source_claim_id to link back. "We should..." is NOT a commitment.
+- Graph edges: build from relationship claims and observed connections. Include person↔topic, person↔org, not just person↔person.
+- What-changed: per person, summarize what's new/different compared to previous context.
+- Sentiment: assess the overall emotional tone of the conversation. "warm" = friendly/personal, "neutral" = straightforward, "transactional" = business-only, "tense" = conflict/stress, "enthusiastic" = high energy/excitement.
+- Relationship delta: assess whether the relationship moved. "strengthened" = closer/deeper, "maintained" = stable, "weakened" = strained/cooled, "new" = first meaningful interaction.
+- Be specific, not generic. "Heath seemed stressed" is bad. "Heath's jitter +45% when discussing compliance deadline (claim_007) suggests elevated stress about timeline" is good.
+"""
+
+SOLO_EXTRACTION_SYSTEM_PROMPT = """You are Sauron, extracting intelligence from Stephen Andrews' solo voice captures.
+These are recordings where Stephen is talking to himself — brainstorming, dictating tasks,
+debriefing after meetings, journaling, or setting pre-meeting intentions.
+
+Output valid JSON matching this schema:
+{
+  "summary": "brief summary of the solo capture",
+  "solo_mode": "note|tasks|debrief|journal|prep|general",
+  "tasks": ["specific action items dictated"],
+  "ideas": ["ideas or insights captured"],
+  "contact_follow_ups": [{"description": "...", "priority": "high|medium|low", "due_date": "YYYY-MM-DD or null"}],
+  "strategic_insights": ["strategic observations"],
+  "journal_prose": "reflective content if journal mode, else null",
+  "pre_meeting_goals": ["goals for upcoming meeting if prep mode"],
+  "linked_contact_names": ["names of people mentioned"]
+}
+
+Be thorough — capture every task, idea, and name mentioned.
+"""
+
+
+def synthesize(
+    transcript_text: str,
+    claims: ClaimsResult,
+    vocal_summary: str | None = None,
+    calendar_context: dict | None = None,
+    triage: TriageResult | None = None,
+    existing_beliefs: list[dict] | None = None,
+    amendment_context: str = "",
+) -> tuple[SynthesisResult, dict]:
+    """Run Opus synthesis on claims + vocal analysis.
+
+    Args:
+        transcript_text: Formatted diarized transcript with speaker names.
+        claims: ClaimsResult from Sonnet Pass 2.
+        vocal_summary: Formatted vocal analysis with baseline comparisons.
+        calendar_context: Calendar event context.
+        triage: Haiku triage result.
+        existing_beliefs: Current beliefs about people in this conversation.
+        amendment_context: Learned preferences.
+
+    Returns:
+        (SynthesisResult, usage_dict)
+    """
+    client = anthropic.Anthropic()
+
+    system = SYNTHESIS_SYSTEM_PROMPT
+    if amendment_context:
+        system += f"\n\n{amendment_context}"
+
+    user_content = _build_synthesis_context(
+        transcript_text, claims, vocal_summary,
+        calendar_context, triage, existing_beliefs
+    )
+
+    logger.info("Running Opus synthesis...")
+    response = client.messages.create(
+        model=EXTRACTION_MODEL,
+        max_tokens=16384,
+        system=system,
+        messages=[{"role": "user", "content": user_content}],
+    )
+
+    raw_text = extract_json(response.content[0].text)
+
+    result = SynthesisResult.model_validate_json(raw_text)
+
+    usage = {
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens,
+    }
+
+    logger.info(
+        f"Synthesis complete: {len(result.belief_updates)} belief updates, "
+        f"{len(result.my_commitments)} my commitments, "
+        f"{len(result.contact_commitments)} their commitments, "
+        f"{len(result.graph_edges)} graph edges, "
+        f"{len(result.self_coaching)} coaching notes"
+    )
+
+    return result, usage
+
+
+def solo_extract(
+    transcript_text: str,
+    triage: TriageResult | None = None,
+    amendment_context: str = "",
+) -> tuple[SoloExtractionResult, dict]:
+    """Run extraction on a solo capture (single speaker)."""
+    client = anthropic.Anthropic()
+
+    system = SOLO_EXTRACTION_SYSTEM_PROMPT
+    if amendment_context:
+        system += f"\n\n{amendment_context}"
+
+    user_content = f"Solo capture transcript:\n\n{transcript_text}"
+    if triage and triage.solo_mode:
+        user_content += f"\n\nDetected solo mode: {triage.solo_mode}"
+
+    logger.info("Running solo extraction...")
+    response = client.messages.create(
+        model=EXTRACTION_MODEL,
+        max_tokens=4096,
+        system=system,
+        messages=[{"role": "user", "content": user_content}],
+    )
+
+    raw_text = extract_json(response.content[0].text)
+
+    result = SoloExtractionResult.model_validate_json(raw_text)
+
+    usage = {
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens,
+    }
+
+    logger.info(
+        f"Solo extraction complete: {len(result.tasks)} tasks, "
+        f"{len(result.ideas)} ideas, {len(result.contact_follow_ups)} follow-ups"
+    )
+
+    return result, usage
+
+
+def _build_synthesis_context(
+    transcript_text: str,
+    claims: ClaimsResult,
+    vocal_summary: str | None,
+    calendar_context: dict | None,
+    triage: TriageResult | None,
+    existing_beliefs: list[dict] | None,
+) -> str:
+    """Build the full context package for Opus synthesis."""
+    parts = []
+
+    if calendar_context:
+        parts.append(f"## Calendar Context\n{json.dumps(calendar_context, indent=2)}")
+
+    if triage:
+        episode_info = ""
+        if triage.episodes:
+            episode_lines = [
+                f"  - [{ep.start_time:.0f}-{ep.end_time:.0f}s] {ep.episode_type}: {ep.title}"
+                for ep in triage.episodes
+            ]
+            episode_info = "\nEpisodes:\n" + "\n".join(episode_lines)
+
+        parts.append(
+            f"## Triage Classification\n"
+            f"Context: {triage.context_classification}\n"
+            f"Value: {triage.value_assessment}\n"
+            f"Speakers: {triage.speaker_count}\n"
+            f"Topics: {', '.join(triage.topic_tags)}"
+            f"{episode_info}"
+        )
+
+    # Claims from Sonnet — the primary input
+    claims_json = []
+    for c in claims.claims:
+        claims_json.append(c.model_dump(exclude_none=True))
+    parts.append(
+        f"## Extracted Claims ({len(claims.claims)} total)\n\n"
+        f"```json\n{json.dumps(claims_json, indent=2)}\n```"
+    )
+
+    if claims.memory_writes:
+        writes_json = [m.model_dump() for m in claims.memory_writes]
+        parts.append(
+            f"## Memory Writes ({len(claims.memory_writes)})\n\n"
+            f"```json\n{json.dumps(writes_json, indent=2)}\n```"
+        )
+
+    if existing_beliefs:
+        parts.append(
+            f"## Existing Beliefs About People in This Conversation\n\n"
+            f"```json\n{json.dumps(existing_beliefs, indent=2)}\n```"
+        )
+
+    parts.append(f"## Diarized Transcript\n\n{transcript_text}")
+
+    if vocal_summary:
+        parts.append(f"## Vocal Analysis (with baseline comparisons)\n\n{vocal_summary}")
+
+    return "\n\n---\n\n".join(parts)
