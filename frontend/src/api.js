@@ -418,6 +418,13 @@ export const api = {
       body: JSON.stringify({ original_name: originalName, entity_id: entityId }),
     }),
 
+  // Contact duplicate detection
+  checkDuplicateContacts: () =>
+    fetchJSON("/graph/duplicates"),
+
+  resolveDuplicateContacts: () =>
+    fetchJSON("/graph/resolve-duplicates", { method: "POST" }),
+
   routingPreview: (conversationId) =>
     fetchJSON(`/conversations/${conversationId}/routing-preview`),
 };

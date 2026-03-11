@@ -735,3 +735,211 @@ def create_contact(request: CreateContactRequest):
         }
     finally:
         conn.close()
+
+# -- Duplicate contact detection & networking app validation -----
+
+@router.get("/duplicates")
+def detect_duplicate_contacts():
+    """Detect duplicate unified_contacts sharing the same networking_app_contact_id.
+
+    For each group of duplicates, validates against the networking app to check
+    whether the canonical contact still exists. Returns a report with:
+    - sauron_duplicates: groups of rows sharing a networking_app_contact_id
+    - networking_app_status: whether each networking_app_contact_id resolves
+      to exactly one contact in the networking app
+    - recommendations: auto-resolvable vs needs-attention
+    """
+    conn = get_connection()
+    try:
+        dup_groups = conn.execute(
+            """SELECT networking_app_contact_id, COUNT(*) as cnt
+               FROM unified_contacts
+               WHERE networking_app_contact_id IS NOT NULL
+               GROUP BY networking_app_contact_id
+               HAVING cnt > 1
+               ORDER BY cnt DESC"""
+        ).fetchall()
+
+        if not dup_groups:
+            return {"status": "clean", "duplicate_count": 0, "groups": [],
+                    "message": "No duplicate contacts found."}
+
+        groups = []
+        networking_warnings = []
+
+        for dg in dup_groups:
+            naid = dg["networking_app_contact_id"]
+            rows = conn.execute(
+                """SELECT id, canonical_name, email, is_confirmed,
+                       source_conversation_id, created_at
+                   FROM unified_contacts
+                   WHERE networking_app_contact_id = ?
+                   ORDER BY is_confirmed DESC, source_conversation_id IS NOT NULL, created_at""",
+                (naid,),
+            ).fetchall()
+
+            contacts_list = [dict(r) for r in rows]
+            net_status = _validate_networking_app_contact(naid)
+
+            group = {
+                "networking_app_contact_id": naid,
+                "sauron_count": dg["cnt"],
+                "contacts": contacts_list,
+                "networking_app_status": net_status,
+                "recommendation": "auto_resolve" if net_status["exists"] else "orphaned",
+            }
+            groups.append(group)
+
+            if net_status.get("warning"):
+                networking_warnings.append({
+                    "networking_app_contact_id": naid,
+                    "warning": net_status["warning"],
+                })
+
+        total_extra = sum(g["sauron_count"] - 1 for g in groups)
+        return {
+            "status": "duplicates_found",
+            "duplicate_count": len(groups),
+            "total_extra_rows": total_extra,
+            "groups": groups,
+            "networking_warnings": networking_warnings,
+            "message": f"{len(groups)} duplicate group(s) found with {total_extra} extra rows.",
+        }
+    finally:
+        conn.close()
+
+
+def _validate_networking_app_contact(networking_app_contact_id: str) -> dict:
+    """Check whether a networking_app_contact_id resolves to a valid contact."""
+    try:
+        import httpx
+        from sauron.config import NETWORKING_APP_URL
+        resp = httpx.get(
+            f"{NETWORKING_APP_URL}/api/contacts/{networking_app_contact_id}",
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "exists": True,
+                "name": data.get("name") or data.get("canonical_name", "Unknown"),
+                "id": data.get("id"),
+                "warning": None,
+            }
+        elif resp.status_code == 404:
+            return {
+                "exists": False,
+                "warning": f"Contact {networking_app_contact_id} not found in networking app (404)",
+            }
+        else:
+            return {
+                "exists": False,
+                "warning": f"Networking app returned status {resp.status_code}",
+            }
+    except Exception as e:
+        return {
+            "exists": False,
+            "warning": f"Failed to reach networking app: {str(e)}",
+        }
+
+
+@router.post("/resolve-duplicates")
+def resolve_duplicate_contacts():
+    """Auto-resolve duplicate unified_contacts by merging into one row per networking_app_contact_id.
+
+    Strategy: keep the best row (is_confirmed=1 preferred, non-conversation-sourced preferred,
+    oldest created_at) and delete extras. Merges aliases from deleted rows into the keeper.
+    Re-points all foreign key references (claims, transcripts, graph edges) to the keeper.
+    """
+    conn = get_connection()
+    try:
+        dup_groups = conn.execute(
+            """SELECT networking_app_contact_id
+               FROM unified_contacts
+               WHERE networking_app_contact_id IS NOT NULL
+               GROUP BY networking_app_contact_id
+               HAVING COUNT(*) > 1"""
+        ).fetchall()
+
+        if not dup_groups:
+            return {"status": "clean", "resolved": 0, "message": "No duplicates to resolve."}
+
+        resolved = 0
+        details = []
+
+        for dg in dup_groups:
+            naid = dg["networking_app_contact_id"]
+            rows = conn.execute(
+                """SELECT id, canonical_name, aliases, is_confirmed,
+                       source_conversation_id, created_at
+                   FROM unified_contacts
+                   WHERE networking_app_contact_id = ?
+                   ORDER BY is_confirmed DESC,
+                            source_conversation_id IS NOT NULL,
+                            created_at""",
+                (naid,),
+            ).fetchall()
+
+            if len(rows) < 2:
+                continue
+
+            keeper = dict(rows[0])
+            dupes = [dict(r) for r in rows[1:]]
+
+            # Merge aliases from dupes into keeper
+            all_aliases = set()
+            for alias_str in [keeper.get("aliases") or ""] + [d.get("aliases") or "" for d in dupes]:
+                for a in alias_str.split(";"):
+                    a = a.strip()
+                    if a:
+                        all_aliases.add(a)
+
+            merged_aliases = "; ".join(sorted(all_aliases)) if all_aliases else None
+
+            conn.execute(
+                "UPDATE unified_contacts SET aliases = ? WHERE id = ?",
+                (merged_aliases, keeper["id"]),
+            )
+
+            # Re-point foreign key references from dupes to keeper
+            for dupe in dupes:
+                conn.execute(
+                    "UPDATE event_claims SET subject_entity_id = ? WHERE subject_entity_id = ?",
+                    (keeper["id"], dupe["id"]),
+                )
+                conn.execute(
+                    "UPDATE claim_entities SET entity_id = ? WHERE entity_id = ?",
+                    (keeper["id"], dupe["id"]),
+                )
+                conn.execute(
+                    "UPDATE transcripts SET speaker_id = ? WHERE speaker_id = ?",
+                    (keeper["id"], dupe["id"]),
+                )
+                conn.execute(
+                    "UPDATE graph_edges SET source_entity_id = ? WHERE source_entity_id = ?",
+                    (keeper["id"], dupe["id"]),
+                )
+                conn.execute(
+                    "UPDATE graph_edges SET target_entity_id = ? WHERE target_entity_id = ?",
+                    (keeper["id"], dupe["id"]),
+                )
+                conn.execute("DELETE FROM unified_contacts WHERE id = ?", (dupe["id"],))
+
+            resolved += 1
+            details.append({
+                "networking_app_contact_id": naid,
+                "kept": keeper["canonical_name"],
+                "kept_id": keeper["id"],
+                "removed_count": len(dupes),
+                "removed": [d["canonical_name"] for d in dupes],
+            })
+
+        conn.commit()
+        return {
+            "status": "resolved",
+            "resolved": resolved,
+            "details": details,
+            "message": f"Resolved {resolved} duplicate group(s).",
+        }
+    finally:
+        conn.close()
