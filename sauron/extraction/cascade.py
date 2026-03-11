@@ -72,9 +72,13 @@ def cascade_entity_confirmation(
             SELECT ec.id, ec.subject_name, ec.subject_entity_id, ec.review_status
             FROM event_claims ec
             WHERE LOWER(TRIM(ec.subject_name)) IN ({placeholders})
-              AND (ec.subject_entity_id IS NULL OR ec.subject_entity_id != ?)
-              AND (ec.review_status IS NULL
-                   OR ec.review_status NOT IN ('user_confirmed', 'user_corrected', 'dismissed'))
+              AND ec.review_status IS NOT 'dismissed'
+              AND (
+                  ec.subject_entity_id IS NULL
+                  OR (ec.subject_entity_id != ?
+                      AND (ec.review_status IS NULL
+                           OR ec.review_status NOT IN ('user_confirmed', 'user_corrected')))
+              )
               {conv_clause}
         """
         params = names_lower + [entity_id] + conv_params
