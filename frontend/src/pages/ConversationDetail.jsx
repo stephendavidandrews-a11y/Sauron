@@ -2,21 +2,21 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
 
-const C = {
+export const C = {
   bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
   border: '#1f2937', borderLight: '#374151', text: '#e5e7eb',
   textMuted: '#9ca3af', textDim: '#6b7280', accent: '#3b82f6',
   success: '#10b981', warning: '#f59e0b', danger: '#ef4444', purple: '#8b5cf6',
   amber: '#d97706',
 };
-const cardStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 20 };
+export const cardStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 20 };
 
-const claimTypeColors = {
+export const claimTypeColors = {
   fact: C.accent, position: C.purple, commitment: C.warning,
   preference: C.success, relationship: '#ec4899', observation: C.textMuted, tactical: '#f97316',
 };
 
-const errorTypes = [
+export const errorTypes = [
   { value: 'hallucinated_claim', label: 'Not real / hallucinated' },
   { value: 'wrong_claim_type', label: 'Wrong type' },
   { value: 'wrong_modality', label: 'Wrong modality' },
@@ -283,7 +283,7 @@ export default function ConversationDetail() {
 // ═══════════════════════════════════════════════════════
 // BULK REASSIGNMENT MODAL
 // ═══════════════════════════════════════════════════════
-function BulkReassignModal({ conversationId, linkedEntities, contacts, onClose, onComplete, onSwitchTab }) {
+export function BulkReassignModal({ conversationId, linkedEntities, contacts, onClose, onComplete, onSwitchTab }) {
   const [fromEntityId, setFromEntityId] = useState('');
   const [toEntityId, setToEntityId] = useState('');
   const [scope, setScope] = useState('all');
@@ -516,7 +516,7 @@ function BulkReassignModal({ conversationId, linkedEntities, contacts, onClose, 
 // ═══════════════════════════════════════════════════════
 // EPISODES TAB — Primary Review Surface
 // ═══════════════════════════════════════════════════════
-function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, conversationId, contacts, updateClaim, addClaimToState }) {
+export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, conversationId, contacts, updateClaim, addClaimToState }) {
   const [episodes, setEpisodes] = useState(initialEpisodes);
   useEffect(() => { setEpisodes(initialEpisodes); }, [initialEpisodes]);
   const claims = initialClaims;  // Use lifted parent state directly
@@ -859,7 +859,7 @@ function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, convers
 // ═══════════════════════════════════════════════════════
 
 
-function AddClaimForm({ conversationId, episodeId, contacts, onCreated, onCancel }) {
+export function AddClaimForm({ conversationId, episodeId, contacts, onCreated, onCancel }) {
   const [claimType, setClaimType] = useState('fact');
   const [claimText, setClaimText] = useState('');
   const [subjectName, setSubjectName] = useState('');
@@ -1010,7 +1010,7 @@ function AddClaimForm({ conversationId, episodeId, contacts, onCreated, onCancel
 }
 
 
-function CommitmentEditPanel({ claim, conversationId, onSave, onCancel }) {
+export function CommitmentEditPanel({ claim, conversationId, onSave, onCancel }) {
   const [fields, setFields] = useState({
     firmness: claim.firmness || '',
     direction: claim.direction || '',
@@ -1133,7 +1133,7 @@ function CommitmentEditPanel({ claim, conversationId, onSave, onCancel }) {
   );
 }
 
-function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDeferred, isEditing, editText,
+export function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDeferred, isEditing, editText,
   showRelinkPrompt, onApprove, onDefer, onDismiss, onEdit, onStartEdit, onCancelEdit, onEditTextChange,
   onEntityLink, onRemoveEntity, onDismissRelink, contacts, onBatchCorrect, episodes, onReassign }) {
   const [editingSubFieldsClaim, setEditingSubFieldsClaim] = useState(null);
@@ -1353,7 +1353,7 @@ function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDeferred, 
 // ═══════════════════════════════════════════════════════
 // CLAIM TEXT WITH DISPLAY OVERRIDES — amber highlighting
 // ═══════════════════════════════════════════════════════
-function ClaimTextWithOverrides({ text, overrides }) {
+export function ClaimTextWithOverrides({ text, overrides }) {
   if (!overrides || !Array.isArray(overrides) || overrides.length === 0) {
     return <span>{text}</span>;
   }
@@ -1390,7 +1390,7 @@ function ClaimTextWithOverrides({ text, overrides }) {
 // ═══════════════════════════════════════════════════════
 // ENTITY CHIPS — renders from claim_entities junction table
 // ═══════════════════════════════════════════════════════
-function EntityChips({ claim, contacts, onLink, onRemoveEntity, conversationId }) {
+export function EntityChips({ claim, contacts, onLink, onRemoveEntity, conversationId }) {
   const entities = claim.entities || [];
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState('');
@@ -1488,7 +1488,7 @@ function EntityLinkButton({ claim, contacts, onLink }) {
 // ═══════════════════════════════════════════════════════
 // ERROR TYPE DROPDOWN
 // ═══════════════════════════════════════════════════════
-function ErrorTypeDropdown({ claim, onSelect }) {
+export function ErrorTypeDropdown({ claim, onSelect }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position: 'relative' }}>
@@ -1517,7 +1517,7 @@ function ErrorTypeDropdown({ claim, onSelect }) {
 // ═══════════════════════════════════════════════════════
 // TRANSCRIPT TAB — Speaker correction + text editing
 // ═══════════════════════════════════════════════════════
-function TranscriptTab({ transcript, conversationId, contacts }) {
+export function TranscriptTab({ transcript, conversationId, contacts }) {
   const [editingSeg, setEditingSeg] = useState(null);
   const [editText, setEditText] = useState('');
   const [correctedSegs, setCorrectedSegs] = useState(new Set());
@@ -1639,7 +1639,7 @@ function TranscriptTab({ transcript, conversationId, contacts }) {
 // ═══════════════════════════════════════════════════════
 // CLAIMS TAB — Flat list
 // ═══════════════════════════════════════════════════════
-function ClaimsTab({ claims: initialClaims, conversationId, contacts, updateClaim }) {
+export function ClaimsTab({ claims: initialClaims, conversationId, contacts, updateClaim }) {
     const claims = initialClaims;
   const [dismissed, setDismissed] = useState(() => {
     const d = {};
@@ -1834,7 +1834,7 @@ function ClaimsTab({ claims: initialClaims, conversationId, contacts, updateClai
 // ═══════════════════════════════════════════════════════
 // SUMMARY TAB
 // ═══════════════════════════════════════════════════════
-function SummaryTab({ synthesis, beliefUpdates, claims = [] }) {
+export function SummaryTab({ synthesis, beliefUpdates, claims = [] }) {
   return (
     <div>
       {synthesis.summary && (
@@ -1930,7 +1930,7 @@ function SummaryTab({ synthesis, beliefUpdates, claims = [] }) {
   );
 }
 
-function CommitmentRow({ claim, direction, isDismissed }) {
+export function CommitmentRow({ claim, direction, isDismissed }) {
   const dirColor = direction === 'I owe' ? C.warning : direction === 'Dismissed' ? C.textDim : C.accent;
   const dirBg = direction === 'I owe' ? C.warning + '22' : direction === 'Dismissed' ? C.textDim + '15' : C.accent + '22';
   return (
@@ -1971,7 +1971,7 @@ function CommitmentRow({ claim, direction, isDismissed }) {
   );
 }
 
-function RawTab({ extraction }) {
+export function RawTab({ extraction }) {
   return (
     <div style={cardStyle}>
       <pre style={{ fontSize: 12, color: C.textMuted, whiteSpace: 'pre-wrap', lineHeight: 1.6, maxHeight: 600, overflow: 'auto' }}>
@@ -1982,7 +1982,7 @@ function RawTab({ extraction }) {
 }
 
 
-function RelationalReferencesBanner({ conversationId, contacts, onResolved }) {
+export function RelationalReferencesBanner({ conversationId, contacts, onResolved }) {
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [linkingId, setLinkingId] = useState(null);
@@ -2336,7 +2336,7 @@ function RelationalReferencesBanner({ conversationId, contacts, onResolved }) {
 }
 
 
-function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeopleLoaded }) {
+export function PeopleReviewBanner({ conversationId, contacts, onResolved, onPeopleLoaded }) {
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -2797,7 +2797,7 @@ const OBJECT_TYPE_LABELS = {
   follow_ups: 'Follow-Ups',
 };
 
-function RoutingPreview({ conversationId, refreshKey }) {
+export function RoutingPreview({ conversationId, refreshKey }) {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -2954,7 +2954,7 @@ function RoutingPreview({ conversationId, refreshKey }) {
 }
 
 
-function Chip({ label, value, color }) {
+export function Chip({ label, value, color }) {
   return (
     <span style={{ fontSize: 12, padding: '4px 10px', borderRadius: 4,
       background: `${color || C.accent}15`, color: C.textMuted }}>
