@@ -159,7 +159,7 @@ export default function ConversationDetail() {
   ];
 
   return (
-    <div className="py-4">
+    <div className="py-4" data-testid="conversation-detail">
       <Link to="/review" className="text-accent text-sm no-underline">{'\u2190'} Back to review</Link>
       <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
@@ -171,7 +171,7 @@ export default function ConversationDetail() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {/* Reassign Speaker button */}
           {Object.keys(linkedEntities).length > 0 && (
-            <button onClick={() => setShowReassignModal(true)}
+            <button onClick={() => setShowReassignModal(true)} data-testid="reassign-speaker-btn"
               style={{ padding: '8px 16px', background: `${C.amber}22`, color: C.amber,
                 border: `1px solid ${C.amber}44`, borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>
               Reassign Speaker
@@ -179,13 +179,13 @@ export default function ConversationDetail() {
           )}
 
           {(convo.processing_status === 'completed' || convo.processing_status === 'awaiting_claim_review') && !isReviewed && (<>
-            <button onClick={handleDiscard} disabled={discarding}
+            <button onClick={handleDiscard} disabled={discarding} data-testid="discard-btn"
               style={{ padding: '6px 14px', background: 'transparent', color: '#ef4444',
                 border: '1px solid #ef444444', borderRadius: 6, fontSize: 12, cursor: 'pointer',
                 opacity: discarding ? 0.7 : 1 }}>
               {discarding ? 'Discarding...' : '✗ Discard'}
             </button>
-            <button onClick={handleMarkReviewed} disabled={reviewing}
+            <button onClick={handleMarkReviewed} disabled={reviewing} data-testid="mark-reviewed-btn"
               style={{ padding: '8px 16px', background: C.success, color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', opacity: reviewing ? 0.7 : 1 }}>
               {reviewing ? 'Reviewing...' : (<>
                 {'✓ Mark as Reviewed'}
@@ -199,7 +199,7 @@ export default function ConversationDetail() {
           </>)}
           {isReviewed && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ padding: '8px 16px', background: `${C.success}22`, color: C.success, borderRadius: 6, fontSize: 13, fontWeight: 600 }}>
+              <span data-testid="reviewed-badge" style={{ padding: '8px 16px', background: `${C.success}22`, color: C.success, borderRadius: 6, fontSize: 13, fontWeight: 600 }}>
                 {'✓'} Reviewed
               </span>
               {reviewStats && (
@@ -221,7 +221,7 @@ export default function ConversationDetail() {
             </Link>
           )}
           {(convo.processing_status === 'error' || convo.processing_status === 'pending') && (
-            <button onClick={handleReprocess} disabled={reprocessing}
+            <button onClick={handleReprocess} disabled={reprocessing} data-testid="reprocess-btn"
               style={{ padding: '8px 16px', background: C.accent, color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', opacity: reprocessing ? 0.7 : 1 }}>
               {reprocessing ? 'Processing...' : 'Reprocess'}
             </button>
@@ -251,7 +251,7 @@ export default function ConversationDetail() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
         {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
+          <button key={t.key} onClick={() => setTab(t.key)} data-testid={`tab-${t.key}`}
             style={{ padding: '8px 16px', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500,
               background: tab === t.key ? C.accent : C.card, color: tab === t.key ? '#fff' : C.textMuted }}>
             {t.label}
@@ -1150,7 +1150,7 @@ export function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDef
   ) : null;
 
   return (
-    <div style={{
+    <div data-testid={`claim-row-${claim.id}`} style={{
       padding: '10px 0', borderBottom: `1px solid ${C.border}`,
       opacity: isDismissed ? 0.35 : isDeferred ? 0.5 : isReviewed ? 0.7 : 1,
       borderLeft: isDismissed ? `3px solid ${C.danger}33`
@@ -1192,13 +1192,13 @@ export function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDef
         <div style={{ flex: 1 }} />
         {!isDismissed && !isReviewed && !isDeferred && (
           <div style={{ display: 'flex', gap: 4 }}>
-            <button onClick={() => onApprove(claim.id)}
+            <button onClick={() => onApprove(claim.id)} data-testid={`claim-approve-${claim.id}`}
               style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, border: `1px solid ${C.success}44`,
                 background: 'transparent', color: C.success, cursor: 'pointer' }}>{'✓'}</button>
-            <button onClick={() => onDefer(claim.id)}
+            <button onClick={() => onDefer(claim.id)} data-testid={`claim-defer-${claim.id}`}
               style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, border: `1px solid ${C.purple}44`,
                 background: 'transparent', color: C.purple, cursor: 'pointer' }}>Defer</button>
-            <button onClick={() => onStartEdit(claim)}
+            <button onClick={() => onStartEdit(claim)} data-testid={`claim-edit-${claim.id}`}
               style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, border: `1px solid ${C.border}`,
                 background: 'transparent', color: C.textDim, cursor: 'pointer' }}>Edit</button>
             {episodes && episodes.length > 1 && onReassign && (
@@ -1250,7 +1250,7 @@ export function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDef
                 )}
               </div>
             )}
-            <ErrorTypeDropdown claim={claim} onSelect={onDismiss} />
+            <span data-testid={`claim-dismiss-${claim.id}`}><ErrorTypeDropdown claim={claim} onSelect={onDismiss} /></span>
           </div>
         )}
         {isDismissed && <span style={{ fontSize: 11, color: C.danger, textDecoration: 'line-through' }}>{isDismissed.replace(/_/g, ' ')}</span>}

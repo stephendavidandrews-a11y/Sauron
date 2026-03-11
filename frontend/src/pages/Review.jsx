@@ -863,7 +863,7 @@ export default function Review() {
     && !(beliefStats && beliefStats.total > 0);
 
   return (
-    <div style={{ padding: '24px 0' }}>
+    <div style={{ padding: '24px 0' }} data-testid="review-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: C.text, margin: 0 }}>Review</h1>
         {/* Quick Pass toggle + Queue count summary */}
