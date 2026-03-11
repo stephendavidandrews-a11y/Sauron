@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 
-const C = {
+export const C = {
   bg: '#0a0f1a', card: '#111827', border: '#1f2937',
   text: '#e5e7eb', muted: '#9ca3af', dim: '#6b7280',
   accent: '#3b82f6', green: '#10b981', amber: '#f59e0b',
@@ -439,13 +439,13 @@ function EvidenceSection({ evidence, navigate, logClick }) {
   );
 }
 
-const CLAIM_TYPE_COLORS = {
+export const CLAIM_TYPE_COLORS = {
   fact: '#3b82f6', position: '#8b5cf6', commitment: '#f59e0b',
   preference: '#ec4899', relationship: '#10b981', observation: '#6366f1',
   tactical: '#f97316',
 };
 
-function EvidenceHit({ hit, navigate, logClick, conversationId }) {
+export function EvidenceHit({ hit, navigate, logClick, conversationId }) {
   const handleClick = () => {
     logClick('evidence', hit.source_type, hit.source_id);
     navigate(`/review/${conversationId}`);

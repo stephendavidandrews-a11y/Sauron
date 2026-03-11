@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 
-const C = {
+export const C = {
   bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
   border: '#1f2937', text: '#e5e7eb',
   textMuted: '#9ca3af', textDim: '#6b7280',
@@ -42,7 +42,7 @@ function QueueBadge({ count, color }) {
 // QUICK PASS — compact error type picker for dismiss
 // ═══════════════════════════════════════════════════════
 
-const DISMISS_REASONS = [
+export const DISMISS_REASONS = [
   { key: 'hallucinated_claim', label: 'Hallucinated', shortcut: '1' },
   { key: 'overstated_position', label: 'Overstated', shortcut: '2' },
   { key: 'wrong_claim_type', label: 'Wrong type', shortcut: '3' },
@@ -50,7 +50,7 @@ const DISMISS_REASONS = [
   { key: 'bad_commitment_extraction', label: 'Bad extraction', shortcut: '5' },
 ];
 
-function QuickPassErrorPicker({ onSelect, onCancel }) {
+export function QuickPassErrorPicker({ onSelect, onCancel }) {
   useEffect(() => {
     const handler = (e) => {
       if (e.key === 'Escape') { onCancel(); return; }
@@ -83,13 +83,13 @@ function QuickPassErrorPicker({ onSelect, onCancel }) {
 // QUICK PASS — claim card for rapid triage
 // ═══════════════════════════════════════════════════════
 
-const claimTypeColors = {
+export const claimTypeColors = {
   fact: '#3b82f6', position: '#8b5cf6', commitment: '#f59e0b',
   preference: '#10b981', relationship: '#ec4899', observation: '#6366f1',
   tactical: '#ef4444',
 };
 
-function QuickPassClaimCard({ claim, isFocused, onApprove, onDismiss, onEdit, onFlag, isEditing,
+export function QuickPassClaimCard({ claim, isFocused, onApprove, onDismiss, onEdit, onFlag, isEditing,
   editText, onEditChange, onEditSave, onEditCancel }) {
   const [showDismiss, setShowDismiss] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
@@ -222,7 +222,7 @@ function QuickPassClaimCard({ claim, isFocused, onApprove, onDismiss, onEdit, on
 // QUICK PASS — proposal card for belief resynthesis
 // ═══════════════════════════════════════════════════════
 
-function QuickPassProposalCard({ proposal, isFocused, onAccept, onReject }) {
+export function QuickPassProposalCard({ proposal, isFocused, onAccept, onReject }) {
   const cardRef = useRef(null);
 
   useEffect(() => {

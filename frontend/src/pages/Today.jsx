@@ -45,7 +45,7 @@ function formatDate() {
 
 // ── Reusable card components ───────────────────────────────────────────
 
-function Card({ title, badge, action, children, className = '' }) {
+export function Card({ title, badge, action, children, className = '' }) {
   return (
     <div className={`bg-card border border-border rounded-lg p-5 ${className}`}>
       <div className="flex items-center justify-between mb-3">
@@ -66,11 +66,11 @@ function Card({ title, badge, action, children, className = '' }) {
   );
 }
 
-function Empty({ message }) {
+export function Empty({ message }) {
   return <p className="text-sm text-text-dim italic">{message}</p>;
 }
 
-function StatusChip({ status }) {
+export function StatusChip({ status }) {
   const map = {
     active: 'bg-success/20 text-success',
     refined: 'bg-success/20 text-success',
@@ -89,7 +89,7 @@ function StatusChip({ status }) {
   );
 }
 
-function ProcessingChip({ status }) {
+export function ProcessingChip({ status }) {
   const map = {
     completed: 'bg-success/20 text-success',
     processing: 'bg-accent/20 text-accent',
@@ -109,7 +109,7 @@ function ProcessingChip({ status }) {
   );
 }
 
-function ShowMoreButton({ expanded, count, onClick }) {
+export function ShowMoreButton({ expanded, count, onClick }) {
   if (count <= 0) return null;
   return (
     <button
@@ -121,7 +121,7 @@ function ShowMoreButton({ expanded, count, onClick }) {
   );
 }
 
-function useExpandable(items, defaultCount = 5) {
+export function useExpandable(items, defaultCount = 5) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? items : items.slice(0, defaultCount);
   const remaining = items.length - defaultCount;
@@ -131,7 +131,7 @@ function useExpandable(items, defaultCount = 5) {
 
 // ── Section cards ──────────────────────────────────────────────────────
 
-function NeedsReviewCard({ count }) {
+export function NeedsReviewCard({ count }) {
   return (
     <Card title="Needs review" badge={count > 0 ? count : null}>
       {count > 0 ? (
@@ -156,7 +156,7 @@ function NeedsReviewCard({ count }) {
   );
 }
 
-function WhatChangedCard({ beliefs }) {
+export function WhatChangedCard({ beliefs }) {
   const { visible, expanded, remaining, toggle } = useExpandable(beliefs, 5);
 
   return (
@@ -200,7 +200,7 @@ function WhatChangedCard({ beliefs }) {
   );
 }
 
-function CommitmentsCard({ mine, theirs }) {
+export function CommitmentsCard({ mine, theirs }) {
   const [tab, setTab] = useState('mine');
   const items = tab === 'mine' ? mine : theirs;
   const { visible, expanded, remaining, toggle } = useExpandable(items, 5);
@@ -287,7 +287,7 @@ function CommitmentsCard({ mine, theirs }) {
   );
 }
 
-function TodayConversationsCard({ conversations }) {
+export function TodayConversationsCard({ conversations }) {
   const { visible, expanded, remaining, toggle } = useExpandable(conversations, 5);
 
   return (
@@ -471,7 +471,7 @@ function ContestedBeliefsCard({ beliefs }) {
   );
 }
 
-function PipelineStatusBar({ pending, processing }) {
+export function PipelineStatusBar({ pending, processing }) {
   if (pending === 0 && processing === 0) return null;
 
   return (
@@ -496,7 +496,7 @@ function PipelineStatusBar({ pending, processing }) {
   );
 }
 
-function RoutingStatusBar({ routing }) {
+export function RoutingStatusBar({ routing }) {
   if (!routing) return null;
   const { failed_count = 0, pending_entity_count = 0, sent_count = 0 } = routing;
   if (failed_count === 0 && pending_entity_count === 0) return null;
