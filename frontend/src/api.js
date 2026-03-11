@@ -124,6 +124,9 @@ export const api = {
   pipelineProcessPending: () =>
     fetchJSON('/pipeline/process-pending', { method: 'POST' }),
 
+  // Routing status
+  routingStatus: () => fetchJSON('/pipeline/routing-status'),
+
   // Beliefs (v6)
   beliefs: ({ limit = 50, status = null, topic = null, contactId = null, search = null } = {}) => {
     const params = new URLSearchParams({ limit });

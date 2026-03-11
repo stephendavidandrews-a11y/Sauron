@@ -496,11 +496,47 @@ function PipelineStatusBar({ pending, processing }) {
   );
 }
 
+function RoutingStatusBar({ routing }) {
+  if (!routing) return null;
+  const { failed_count = 0, pending_entity_count = 0, sent_count = 0 } = routing;
+  if (failed_count === 0 && pending_entity_count === 0) return null;
+
+  return (
+    <div className="flex items-center gap-4 bg-card border border-border rounded-lg px-4 py-2.5 text-xs">
+      {failed_count > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-danger" />
+          <span className="text-text-muted">
+            {failed_count} failed route{failed_count !== 1 ? 's' : ''}
+          </span>
+        </div>
+      )}
+      {pending_entity_count > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-warning" />
+          <span className="text-text-muted">
+            {pending_entity_count} pending hold{pending_entity_count !== 1 ? 's' : ''}
+          </span>
+        </div>
+      )}
+      {sent_count > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-success" />
+          <span className="text-text-muted">
+            {sent_count} sent
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────
 
 export default function Today() {
   const [mode, setMode] = useState(getTimeMode);
   const [data, setData] = useState(null);
+  const [routing, setRouting] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -522,9 +558,13 @@ export default function Today() {
     setLoading(true);
     setError(null);
 
-    api.todayBrief()
-      .then((result) => {
+    Promise.all([
+      api.todayBrief(),
+      api.routingStatus().catch(() => null),
+    ])
+      .then(([result, routingResult]) => {
         setData(result);
+        setRouting(routingResult);
         // Sync mode from server if available, but allow manual override
         if (result.mode && !modeOverridden.current) {
           setMode(result.mode);
@@ -622,6 +662,7 @@ export default function Today() {
 
       {/* Pipeline status bar */}
       <PipelineStatusBar pending={pendingCount} processing={processingCount} />
+      <RoutingStatusBar routing={routing} />
 
       {/* Empty data notice */}
       {!hasAnyData && (
