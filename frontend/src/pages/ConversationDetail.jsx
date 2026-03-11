@@ -305,9 +305,9 @@ export function BulkReassignModal({
     if (q.length < 2) { setToResults([]); return; }
     try {
       const r = await searchContactsFn(q, 10);
-      setToResults(r);
+      setToResults(r.filter(c => c.is_confirmed !== 0));
     } catch {
-      setToResults(contacts.filter(c => c.canonical_name.toLowerCase().includes(q.toLowerCase())).slice(0, 10));
+      setToResults(contacts.filter(c => c.is_confirmed !== 0 && c.canonical_name.toLowerCase().includes(q.toLowerCase())).slice(0, 10));
     }
   };
 
@@ -1406,8 +1406,8 @@ export function EntityChips({ claim, contacts, onLink, onRemoveEntity, conversat
     if (q.length < 2) { setResults([]); return; }
     try {
       const r = await api.searchContacts(q, 10);
-      setResults(r);
-    } catch { setResults(contacts.filter(c => c.canonical_name.toLowerCase().includes(q.toLowerCase())).slice(0, 10)); }
+      setResults(r.filter(c => c.is_confirmed !== 0));
+    } catch { setResults(contacts.filter(c => c.is_confirmed !== 0 && c.canonical_name.toLowerCase().includes(q.toLowerCase())).slice(0, 10)); }
   };
 
   // Fallback: if no entities from junction table, show subject_name with link button
@@ -1709,20 +1709,22 @@ export function ClaimsTab({ claims: initialClaims, conversationId, contacts, upd
   const handleEntityLink = async (claim, contactId) => {
     try {
       const result = await api.linkEntity(conversationId, claim.id, contactId, claim.subject_name, null);
-      claim.subject_entity_id = contactId;
       const contact = contacts.find(c => c.id === contactId);
-      if (contact) {
-        claim.subject_name = contact.canonical_name;
-        // Update entities array for chip display — ADD, don't replace
-        if (!claim.entities) claim.entities = [];
-        claim.entities = claim.entities.filter(e => !(e.role === 'subject' && e.link_source === 'model'));
-        if (!claim.entities.find(e => e.entity_id === contactId)) {
-          claim.entities.push({ id: 'new-' + Date.now(), claim_id: claim.id, entity_id: contactId,
-            entity_name: contact.canonical_name, role: 'subject', link_source: 'user' });
-        }
+      const newName = contact ? contact.canonical_name : claim.subject_name;
+      // Use entities from backend response (source of truth), matching EpisodesTab pattern
+      if (result && result.entities) {
+        updateClaim(claim.id, {
+          subject_entity_id: contactId,
+          subject_name: newName,
+          entities: result.entities,
+        });
+      } else {
+        // Fallback: update without entities
+        updateClaim(claim.id, {
+          subject_entity_id: contactId,
+          subject_name: newName,
+        });
       }
-      // Update via parent callback
-      updateClaim(claim.id, { entities: [...(claim.entities || [])] });
       if (result && result.text_updated && result.updated_text) {
         claim.claim_text = result.updated_text;
         claim.display_overrides = null;

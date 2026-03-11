@@ -71,7 +71,12 @@ def list_contacts(limit: int = 500):
 
 @router.get("/search")
 def search_contacts(q: str = Query(..., min_length=1), limit: int = 20):
-    """Search contacts by name or alias for entity linking."""
+    """Search contacts by name or alias for entity linking.
+
+    Returns only canonical networking-app contacts (networking_app_contact_id IS NOT NULL)
+    as the authoritative source for review linking flows. Deduplicates by
+    networking_app_contact_id to handle legacy duplicate rows in unified_contacts.
+    """
     conn = get_connection()
     try:
         search_term = f"%{q}%"
@@ -79,16 +84,31 @@ def search_contacts(q: str = Query(..., min_length=1), limit: int = 20):
             """SELECT id, canonical_name, email, phone_number, aliases, relationships,
                   networking_app_contact_id, voice_profile_id, is_confirmed
                FROM unified_contacts
-               WHERE canonical_name LIKE ?
-                  OR aliases LIKE ?
-                  OR email LIKE ?
+               WHERE networking_app_contact_id IS NOT NULL
+                 AND is_confirmed = 1
+                 AND (canonical_name LIKE ?
+                      OR aliases LIKE ?
+                      OR email LIKE ?)
                ORDER BY
                   CASE WHEN canonical_name LIKE ? THEN 0 ELSE 1 END,
+                  source_conversation_id IS NOT NULL,
                   canonical_name
                LIMIT ?""",
             (search_term, search_term, search_term, search_term, limit),
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        # Deduplicate by networking_app_contact_id (keep first seen = preferred row)
+        seen_naid = set()
+        deduped = []
+        for r in rows:
+            d = dict(r)
+            naid = d.get("networking_app_contact_id")
+            if naid in seen_naid:
+                continue
+            seen_naid.add(naid)
+            deduped.append(d)
+
+        return deduped
     finally:
         conn.close()
 
