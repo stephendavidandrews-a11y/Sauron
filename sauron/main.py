@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from sauron.config import SAURON_PORT, LOGS_DIR
+from sauron import __version__
 from sauron.db.schema import init_db
 from sauron.pipeline.watcher import InboxWatcher
 from sauron.pipeline.processor import process_conversation, process_through_speaker_id
@@ -165,7 +166,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sauron",
     description="Personal Voice Intelligence System",
-    version="0.3.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -226,7 +227,7 @@ def health_check():
 
     return {
         "service": "sauron",
-        "version": "0.3.0",
+        "version": __version__,
         "status": "operational",
         "conversations": {"total": total, "pending": pending},
         "voice_profiles": profiles,
