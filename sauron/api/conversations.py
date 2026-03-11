@@ -886,6 +886,11 @@ class ConfirmPersonRequest(BaseModel):
     entity_id: str
 
 
+class LinkRemainingRequest(BaseModel):
+    entity_id: str
+    subject_name: str
+
+
 class SkipPersonRequest(BaseModel):
     original_name: str
     entity_id: Optional[str] = None
@@ -1146,6 +1151,60 @@ def confirm_person(conversation_id: str, request: ConfirmPersonRequest):
             "entity_id": request.entity_id,
             "cascade": cascade_stats,
         }
+    finally:
+        conn.close()
+
+
+@router.post("/{conversation_id}/link-remaining-claims")
+def link_remaining_claims(conversation_id: str, request: LinkRemainingRequest):
+    """Link orphaned claims to a confirmed entity by exact name match.
+
+    For claims where subject_name matches but subject_entity_id is NULL.
+    Does not overwrite existing links. Does not touch dismissed claims.
+    Requires the entity to be a confirmed contact.
+    """
+    conn = get_connection()
+    try:
+        # Verify entity is confirmed
+        contact = conn.execute(
+            "SELECT id, canonical_name, is_confirmed FROM unified_contacts WHERE id = ?",
+            (request.entity_id,),
+        ).fetchone()
+        if not contact:
+            raise HTTPException(404, "Contact not found")
+        if not contact["is_confirmed"]:
+            raise HTTPException(400, "Contact is not confirmed")
+
+        canonical_name = contact["canonical_name"]
+
+        # Find orphaned claims: same conversation, exact name match, NULL entity, not dismissed
+        orphans = conn.execute(
+            """SELECT id, subject_name FROM event_claims
+               WHERE conversation_id = ?
+                 AND LOWER(TRIM(subject_name)) = LOWER(TRIM(?))
+                 AND subject_entity_id IS NULL
+                 AND (review_status IS NULL OR review_status != 'dismissed')""",
+            (conversation_id, request.subject_name),
+        ).fetchall()
+
+        if not orphans:
+            return {"linked": 0, "entity_id": request.entity_id}
+
+        from sauron.api.corrections import sync_claim_entities_subject
+
+        linked = 0
+        for orphan in orphans:
+            try:
+                sync_claim_entities_subject(
+                    conn, orphan["id"], request.entity_id,
+                    canonical_name, "user_link_remaining",
+                )
+                linked += 1
+            except Exception:
+                logger.exception(f"link-remaining failed for claim {orphan['id'][:8]}")
+
+        conn.commit()
+        return {"linked": linked, "entity_id": request.entity_id, "canonical_name": canonical_name}
     finally:
         conn.close()
 

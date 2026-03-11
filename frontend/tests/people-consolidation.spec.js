@@ -139,4 +139,81 @@ test.describe('People Tab — Consolidated Display', () => {
     // Unknown Caller should have the unresolved badge
     await expect(page.getByText('unresolved')).toBeVisible();
   });
+
+  test('Link N button appears for unlinked claims and calls API on click', async ({ page }) => {
+    // Track whether the link-remaining API was called
+    let apiCalled = false;
+    let apiBody = null;
+    let linkClicked = false;
+
+    // Override people endpoint — use a flag (not call count) because refreshKey
+    // causes PeopleReviewBanner to remount, triggering multiple initial fetches.
+    await page.route('**/api/conversations/conv-test-001/people*', route => {
+      route.fulfill({
+        json: {
+          people: [
+            {
+              original_name: 'Daniel Park', canonical_name: 'Daniel Park',
+              entity_id: 'ent-daniel', status: 'auto_resolved', is_self: false,
+              is_provisional: false, claim_count: 4,
+              unlinked_claim_count: linkClicked ? 0 : 2,
+              all_names: ['Daniel Park'], roles: ['subject'], link_sources: ['entity_resolution'],
+            },
+          ],
+          total: 1,
+        },
+      });
+    });
+
+    await page.route('**/api/conversations/conv-test-001/link-remaining-claims', route => {
+      apiCalled = true;
+      linkClicked = true;
+      apiBody = route.request().postDataJSON();
+      route.fulfill({ json: { linked: 2, entity_id: 'ent-daniel', canonical_name: 'Daniel Park' } });
+    });
+
+    await page.goto('/review/conv-test-001');
+    await expect(page.getByTestId('conversation-detail')).toBeVisible();
+
+    // "Link 2" button should be visible
+    const linkBtn = page.getByRole('button', { name: 'Link 2' });
+    await expect(linkBtn).toBeVisible();
+
+    // Click it
+    await linkBtn.click();
+
+    // Verify API was called with correct payload
+    await page.waitForTimeout(500);
+    expect(apiCalled).toBe(true);
+    expect(apiBody.entity_id).toBe('ent-daniel');
+    expect(apiBody.subject_name).toBe('Daniel Park');
+
+    // After refresh, "Link 2" button should be gone
+    await expect(linkBtn).not.toBeVisible({ timeout: 3000 });
+  });
+
+  test('Link N button hidden when no unlinked claims', async ({ page }) => {
+    await page.route('**/api/conversations/conv-test-001/people*', route => {
+      route.fulfill({
+        json: {
+          people: [
+            {
+              original_name: 'Sarah Chen', canonical_name: 'Sarah Chen',
+              entity_id: 'c-001', status: 'auto_resolved', is_self: false,
+              is_provisional: false, claim_count: 3, unlinked_claim_count: 0,
+              all_names: ['Sarah Chen'], roles: ['subject'], link_sources: ['entity_resolution'],
+            },
+          ],
+          total: 1,
+        },
+      });
+    });
+
+    await page.goto('/review/conv-test-001');
+    await expect(page.getByTestId('conversation-detail')).toBeVisible();
+
+    // No "Link" button should exist
+    const linkBtns = page.getByRole('button').filter({ hasText: /^Link \d+$/ });
+    await expect(linkBtns).toHaveCount(0);
+  });
 });

@@ -2363,6 +2363,7 @@ export function PeopleReviewBanner({
   linkProvisionalFn = api.linkProvisional,
   dismissProvisionalFn = api.dismissProvisional,
   confirmProvisionalFn = api.confirmProvisional,
+  linkRemainingFn = api.linkRemainingClaims,
 }) {
   const [people, setPeople] = useState(initialPeople || []);
   const [loading, setLoading] = useState(!initialPeople);
@@ -2477,6 +2478,17 @@ export function PeopleReviewBanner({
       fetchPeople();
       if (onResolved) onResolved();
     } catch (e) { console.error('Dismiss failed', e); }
+    setActionLoading(null);
+  };
+
+  const handleLinkRemaining = async (person) => {
+    if (!person.entity_id || !person.unlinked_claim_count) return;
+    setActionLoading(person.original_name);
+    try {
+      await linkRemainingFn(conversationId, person.entity_id, person.canonical_name || person.original_name);
+      fetchPeople();
+      if (onResolved) onResolved();
+    } catch (e) { console.error('Link remaining failed', e); }
     setActionLoading(null);
   };
 
@@ -2634,6 +2646,14 @@ export function PeopleReviewBanner({
                   <span style={{ color: C.textDim, fontSize: 11 }}>
                     ({person.claim_count} claim{person.claim_count !== 1 ? 's' : ''}{person.unlinked_claim_count > 0 ? `, ${person.unlinked_claim_count} unlinked` : ''})
                   </span>
+                )}
+                {person.unlinked_claim_count > 0 && person.entity_id && (
+                  <button onClick={() => handleLinkRemaining(person)} disabled={isLoading}
+                    style={{
+                      padding: '1px 6px', fontSize: 10, borderRadius: 3, cursor: 'pointer',
+                      background: C.accent + '18', color: C.accent, border: '1px solid ' + C.accent + '33',
+                      marginLeft: 2,
+                    }}>Link {person.unlinked_claim_count}</button>
                 )}
               </div>
 

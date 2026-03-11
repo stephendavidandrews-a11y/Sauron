@@ -401,6 +401,12 @@ export const api = {
       body: JSON.stringify({ original_name: originalName, entity_id: entityId }),
     }),
 
+  linkRemainingClaims: (conversationId, entityId, subjectName) =>
+    fetchJSON(`/conversations/${conversationId}/link-remaining-claims`, {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId, subject_name: subjectName }),
+    }),
+
   skipPerson: (conversationId, originalName, entityId) =>
     fetchJSON(`/conversations/${conversationId}/skip-person`, {
       method: 'POST',
