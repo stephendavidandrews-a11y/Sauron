@@ -93,10 +93,13 @@ def sync_contacts_from_networking_app() -> dict:
                            email = COALESCE(email, ?),
                            phone_number = COALESCE(phone_number, ?),
                            aliases = ?,
-                           relationships = ?
+                           relationships = ?,
+                           current_title = ?,
+                           current_organization = ?
                        WHERE id = ?""",
                     (nc_id, nc.get("email"), nc.get("phone"),
                      merged_aliases, json.dumps(relationships) if relationships else None,
+                     nc.get("title"), nc.get("organization"),
                      uc["id"]),
                 )
                 stats["matched"] += 1
@@ -106,12 +109,14 @@ def sync_contacts_from_networking_app() -> dict:
                 conn.execute(
                     """INSERT INTO unified_contacts
                        (id, canonical_name, networking_app_contact_id,
-                        email, phone_number, aliases, relationships, is_confirmed)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+                        email, phone_number, aliases, relationships,
+                        current_title, current_organization, is_confirmed)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
                     (new_id, nc_name, nc_id,
                      nc.get("email"), nc.get("phone"),
                      aliases if aliases else None,
-                     json.dumps(relationships) if relationships else None),
+                     json.dumps(relationships) if relationships else None,
+                     nc.get("title"), nc.get("organization")),
                 )
                 stats["created"] += 1
 
@@ -407,6 +412,11 @@ def _update_relationships(conn, nc: dict, nc_id: str):
     if row:
         merged_aliases = _merge_aliases(dict(row).get("aliases", ""), aliases)
         conn.execute(
-            "UPDATE unified_contacts SET relationships = ?, aliases = ? WHERE id = ?",
-            (json.dumps(relationships), merged_aliases, dict(row)["id"]),
+            """UPDATE unified_contacts
+               SET relationships = ?, aliases = ?,
+                   current_title = ?, current_organization = ?
+               WHERE id = ?""",
+            (json.dumps(relationships), merged_aliases,
+             nc.get("title"), nc.get("organization"),
+             dict(row)["id"]),
         )

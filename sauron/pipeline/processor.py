@@ -1074,6 +1074,7 @@ def _run_deep_extraction_only(
                 transcript_text, triage.episodes,
                 amendment_context=amendment_context,
                 speaker_map=speaker_map,
+                conversation_id=conversation_id,
             )
 
             conn.execute(

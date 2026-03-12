@@ -490,6 +490,7 @@ CREATE TABLE IF NOT EXISTS what_changed_snapshots (
     created_at DATETIME DEFAULT (datetime('now'))
 );
 
+-- DEPRECATED (Step I): Zero data, zero writers. Kept for backward compat.
 CREATE TABLE IF NOT EXISTS opportunity_signals (
     id TEXT PRIMARY KEY,
     conversation_id TEXT REFERENCES conversations(id),
@@ -502,6 +503,7 @@ CREATE TABLE IF NOT EXISTS opportunity_signals (
     created_at DATETIME DEFAULT (datetime('now'))
 );
 
+-- DEPRECATED (Step I): Zero data, zero writers. Kept for backward compat.
 CREATE TABLE IF NOT EXISTS ask_vectors (
     id TEXT PRIMARY KEY,
     target_contact_id TEXT,

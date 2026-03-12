@@ -1138,19 +1138,8 @@ def resolve_duplicate_contacts():
                 if r.rowcount: fk_updates["routing_log"] = \
                     fk_updates.get("routing_log", 0) + r.rowcount
 
-                # Table: opportunity_signals.target_contact_id
-                r = conn.execute(
-                    "UPDATE opportunity_signals SET target_contact_id = ? WHERE target_contact_id = ?",
-                    (kid, did))
-                if r.rowcount: fk_updates["opportunity_signals"] = \
-                    fk_updates.get("opportunity_signals", 0) + r.rowcount
-
-                # Table: ask_vectors.target_contact_id
-                r = conn.execute(
-                    "UPDATE ask_vectors SET target_contact_id = ? WHERE target_contact_id = ?",
-                    (kid, did))
-                if r.rowcount: fk_updates["ask_vectors"] = \
-                    fk_updates.get("ask_vectors", 0) + r.rowcount
+                # Step I: opportunity_signals and ask_vectors deprecated
+                # (zero data, zero writers — FK updates removed)
 
                 # Table: policy_positions.contact_id
                 r = conn.execute(

@@ -1,3 +1,4 @@
+import hashlib
 """Pass 2: Sonnet 4.6 Claims Extraction.
 
 Receives: diarized transcript + episode boundaries from Haiku.
@@ -533,6 +534,7 @@ def extract_claims(
     episodes: list[Episode],
     amendment_context: str = "",
     speaker_map: dict | None = None,
+    conversation_id: str = "",
 ) -> tuple[ClaimsResult, dict]:
     """Run Sonnet claims extraction on a conversation in episode batches.
 
@@ -699,7 +701,7 @@ async def _extract_claims_async(
     all_claims = []
     all_memory_writes = []
     all_new_contacts_map = {}
-    claim_counter = 0
+    _seen_claim_hashes = set()
 
     for batch_idx, result, usage in sorted(results, key=lambda r: r[0]):
         total_usage["input_tokens"] += usage["input_tokens"]
@@ -709,8 +711,42 @@ async def _extract_claims_async(
             continue
 
         for claim in result.claims:
-            claim_counter += 1
-            claim.id = f"claim_{claim_counter:03d}"
+            # Step G: Content-deterministic claim IDs.
+            #
+            # Hash basis includes all semantically identifying fields:
+            #   - conversation_id: scopes ID to conversation
+            #   - claim_type: fact|position|commitment|preference|...
+            #   - claim_text: normalized (lowered, stripped)
+            #   - subject_name: who the claim is about
+            #   - target_entity: second entity if relational
+            #   - speaker: who said it
+            #
+            # Same semantic claim → same ID regardless of extraction
+            # order or batch assignment. Different conversations with
+            # identical claim text → different IDs (conversation-scoped).
+            _claim_text_norm = (
+                getattr(claim, "claim_text", "") or ""
+            ).strip().lower()
+            _hash_input = "|".join([
+                conversation_id,
+                getattr(claim, "claim_type", "") or "",
+                _claim_text_norm,
+                getattr(claim, "subject_name", "") or "",
+                getattr(claim, "target_entity", "") or "",
+                getattr(claim, "speaker", "") or "",
+            ])
+            _hash_hex = hashlib.sha256(
+                _hash_input.encode("utf-8")
+            ).hexdigest()[:12]
+            # 12 hex chars = 48 bits ≈ 281 trillion possibilities
+            # Handle collisions within conversation (extremely rare)
+            _candidate = f"claim_{_hash_hex}"
+            _suffix = 0
+            while _candidate in _seen_claim_hashes:
+                _suffix += 1
+                _candidate = f"claim_{_hash_hex}_{_suffix}"
+            _seen_claim_hashes.add(_candidate)
+            claim.id = _candidate
             all_claims.append(claim)
 
         all_memory_writes.extend(result.memory_writes)

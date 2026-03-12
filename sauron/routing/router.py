@@ -66,7 +66,13 @@ def route_extraction(conversation_id: str, extraction: dict):
 
 
 def _route_solo(conversation_id: str, extraction: dict):
-    """Route solo capture content based on content type."""
+    """Route solo capture content based on content type.
+
+    CFTC routing: tasks from solo captures.
+    Networking routing: handled by route_to_networking_app() via solo
+    normalization — debrief/prep solos have their fields mapped into
+    synthesis-compatible shape so existing lanes pick them up naturally.
+    """
     tasks = extraction.get("tasks", [])
     if tasks:
         try:

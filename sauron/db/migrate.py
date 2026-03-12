@@ -392,6 +392,7 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         _run_v19_affiliation_cache(conn)
         _run_v20_affiliation_cache_is_primary(conn)
         _run_v21_provisional_org_suggestions(conn)
+        _run_v22_current_identity(conn)
 
         conn.commit()
         logger.info("Migration complete.")
@@ -725,3 +726,16 @@ def _run_v21_provisional_org_suggestions(conn):
             print("[migrate] v21: added resolution_source_context column")
         print("[migrate] v21: provisional_org_suggestions already exists, skipping")
 
+
+
+def _run_v22_current_identity(conn):
+    """v22: Add current_title/current_organization to unified_contacts.
+
+    Lightweight current institutional identity layer. Richer org/affiliation
+    structure stays in contact_affiliations_cache and downstream models.
+    """
+    for col in ["current_title", "current_organization"]:
+        if not _column_exists(conn, "unified_contacts", col):
+            conn.execute(f"ALTER TABLE unified_contacts ADD COLUMN {col} TEXT")
+            print(f"[migrate] v22: added {col} to unified_contacts")
+    conn.commit()

@@ -102,6 +102,83 @@ def route_to_networking_app(
         synthesis = extraction
         claims = {}
 
+    # ── Solo capture normalization ──────────────────────────────
+    # Solo captures produce a flat SoloExtractionResult with different
+    # field names than synthesis. Only debrief/prep modes contain
+    # contact-relevant data worth routing to Networking.
+    # Other modes (note, tasks, journal, general) stay internal.
+    if "solo_mode" in synthesis:
+        solo_mode = synthesis.get("solo_mode", "general")
+        if solo_mode not in ("debrief", "prep"):
+            logger.info(
+                f"Solo mode '{solo_mode}' — skipping Networking routing "
+                f"(not contact-relevant)"
+            )
+            return True  # Not an error, just nothing to route
+
+        # Normalize solo fields into synthesis-compatible shape so
+        # existing lanes pick them up. No solo-specific lanes.
+        #
+        # contact_follow_ups → follow_ups (inlined on interaction)
+        solo_fus = synthesis.get("contact_follow_ups", [])
+        if solo_fus and "follow_ups" not in synthesis:
+            synthesis["follow_ups"] = [
+                {
+                    "description": (
+                        fu.get("description", "") if isinstance(fu, dict)
+                        else str(fu)
+                    ),
+                    "priority": (
+                        fu.get("priority", "medium") if isinstance(fu, dict)
+                        else "medium"
+                    ),
+                    "due_date": (
+                        fu.get("due_date") if isinstance(fu, dict) else None
+                    ),
+                }
+                for fu in solo_fus
+                if (fu.get("description") if isinstance(fu, dict) else fu)
+            ]
+
+        # Resolve primary contact from linked_contact_names.
+        # Solo captures have no speaker-based contact bridge — the
+        # primary contact must come from who Stephen is debriefing
+        # or prepping about. Require exactly one resolved contact;
+        # ambiguous (multiple) or unresolvable (zero) → skip routing.
+        linked_names = synthesis.get("linked_contact_names", [])
+        resolved_contacts = []
+        for name in linked_names:
+            cid = _resolve_contact_id_for_entity(name, None)
+            if cid:
+                resolved_contacts.append((name, cid))
+
+        if len(resolved_contacts) == 1:
+            # Single resolved contact — use as primary for interaction
+            _solo_contact_name, _solo_contact_id = resolved_contacts[0]
+            networking_app_contact_id = _solo_contact_id
+            # Tag synthesis so _execute_routing applies solo-specific
+            # gating (no automatic interaction, strict contact resolution)
+            synthesis["_solo_routing"] = True
+            synthesis["_solo_mode"] = solo_mode
+            logger.info(
+                f"Solo {solo_mode}: resolved primary contact "
+                f"'{_solo_contact_name}' → {_solo_contact_id[:8]}"
+            )
+        elif len(resolved_contacts) == 0:
+            logger.info(
+                f"Solo {solo_mode}: no linked contacts resolved — "
+                f"skipping Networking routing"
+            )
+            return True
+        else:
+            # Multiple contacts resolved — ambiguous primary.
+            # Skip rather than misattribute.
+            logger.info(
+                f"Solo {solo_mode}: {len(resolved_contacts)} contacts "
+                f"resolved (ambiguous primary) — skipping Networking routing"
+            )
+            return True
+
     # Resolve contact ID if not provided
     if networking_app_contact_id is None:
         from sauron.db.connection import get_connection
@@ -184,35 +261,79 @@ def _execute_routing(
 
     # 1. Interaction with inline commitments + follow-ups
     #    Follow-ups routed via followUpRequired/followUpDescription (not standalone endpoint)
-    commitments_inline = _collect_inline_commitments(synthesis)
-    follow_ups = synthesis.get("follow_ups", [])
-    interaction_payload = {
-        "source": "sauron",
-        "sourceSystem": "sauron",
-        "sourceId": conversation_id,
-        "type": "conversation",
-        "date": datetime.utcnow().isoformat() + "Z",
-        "summary": synthesis.get("summary", ""),
-        "topicsDiscussed": synthesis.get("topics_discussed", []),
-        "relationshipNotes": synthesis.get("relationship_notes"),
-        "sentiment": _infer_sentiment(synthesis),
-        "relationshipDelta": _infer_delta(synthesis),
-        "commitments": commitments_inline,
-        "followUpRequired": len(follow_ups) > 0,
-        "followUpDescription": "; ".join(
-            fu.get("description", "") for fu in follow_ups
-        ) if follow_ups else None,
-    }
-    if networking_app_contact_id:
-        interaction_payload["contactId"] = networking_app_contact_id
+    #
+    # Solo gate: solo captures should NOT always create Interaction rows.
+    #   - debrief: create interaction ONLY if summary is substantive
+    #     (describes a real meeting/relationship event, not just "I was
+    #     thinking about X")
+    #   - prep: do NOT create interaction (prep is forward-looking planning,
+    #     not a past event; downstream lanes like follow-ups and calendar
+    #     events handle prep outputs better)
+    _is_solo = synthesis.get("_solo_routing", False)
+    _solo_mode = synthesis.get("_solo_mode", "")
+    _skip_interaction = False
 
-    ok, err, _resp = _api_call("POST", f"{NETWORKING_APP_URL}/api/interactions", interaction_payload)
-    if ok:
-        successes.append(("interaction", interaction_payload))
-        core_lane_results.append({"name": "interaction", "status": "success"})
+    if _is_solo:
+        if _solo_mode == "prep":
+            _skip_interaction = True
+            logger.info("Solo prep: skipping interaction creation (not a past event)")
+        elif _solo_mode == "debrief":
+            # Only create interaction if summary has real substance
+            _summary = synthesis.get("summary", "")
+            if len(_summary) < 30:
+                _skip_interaction = True
+                logger.info(
+                    f"Solo debrief: skipping interaction (summary too thin: "
+                    f"{len(_summary)} chars)"
+                )
+
+    if not _skip_interaction:
+        commitments_inline = _collect_inline_commitments(synthesis)
+        follow_ups = synthesis.get("follow_ups", [])
+        interaction_payload = {
+            "source": "sauron",
+            "sourceSystem": "sauron",
+            "sourceId": conversation_id,
+            "type": "conversation",
+            "date": datetime.utcnow().isoformat() + "Z",
+            "summary": synthesis.get("summary", ""),
+            "topicsDiscussed": synthesis.get("topics_discussed", []),
+            "relationshipNotes": synthesis.get("relationship_notes"),
+            "sentiment": _infer_sentiment(synthesis),
+            "relationshipDelta": _infer_delta(synthesis),
+            "commitments": commitments_inline,
+            "followUpRequired": len(follow_ups) > 0,
+            "followUpDescription": "; ".join(
+                fu.get("description", "") for fu in follow_ups
+            ) if follow_ups else None,
+        }
+        if networking_app_contact_id:
+            interaction_payload["contactId"] = networking_app_contact_id
+
+        ok, err, _resp = _api_call("POST", f"{NETWORKING_APP_URL}/api/interactions", interaction_payload)
+        _created_interaction_id = None
+        if ok:
+            # Capture interaction ID for participant routing
+            if isinstance(_resp, dict):
+                _created_interaction_id = _resp.get("id")
+            successes.append(("interaction", interaction_payload))
+            core_lane_results.append({"name": "interaction", "status": "success"})
+        else:
+            errors.append(("interaction", interaction_payload, err))
+            core_lane_results.append({"name": "interaction", "status": "failed", "error": err})
     else:
-        errors.append(("interaction", interaction_payload, err))
-        core_lane_results.append({"name": "interaction", "status": "failed", "error": err})
+        _created_interaction_id = None
+        core_lane_results.append({"name": "interaction", "status": "skipped_solo"})
+
+    # 1A. Interaction participants — multi-person tracking
+    #     After interaction creation, register all resolved speakers as
+    #     participants. Uses speaker-contact bridge from diarization.
+    #     Only fires when interaction was actually created.
+    if _created_interaction_id:
+        _route_interaction_participants(
+            _created_interaction_id, conversation_id,
+            networking_app_contact_id, sel_conn,
+        )
 
     # 1B. Standalone commitment records (secondary — non-fatal)
     commit_ok, commit_errs = _route_standalone_commitments(
@@ -253,6 +374,9 @@ def _execute_routing(
         )
         if offer_cid == _SKIP_SENTINEL:
             logger.debug(f"Skipping standing_offer[{idx}]: person marked as skipped")
+            continue
+        if not offer_cid:
+            logger.debug(f"Skipping standing_offer[{idx}]: could not resolve contact")
             continue
         offer_payload = {
             "contactId": offer_cid,
@@ -504,6 +628,9 @@ def _execute_routing(
         res_contact_id = _resolve_contact_id_for_entity(
             res.get("contact_name", ""), networking_app_contact_id
         )
+        if not res_contact_id:
+            logger.debug(f"Skipping referenced_resource: could not resolve contact")
+            continue
         res_payload = {
             "contactId": res_contact_id,
             "description": res.get("description", ""),
@@ -680,7 +807,63 @@ def _execute_routing(
     successes.extend(aff_ok)
     secondary_errors.extend(aff_errs)
 
-    # Summarize status_changes lane
+    # 16. Calendar events (secondary — non-fatal)
+    #     Routes calendar_events from synthesis to Networking's Google Calendar
+    #     integration. Attendee names are included in description/context rather
+    #     than blocking event creation on unresolved contacts.
+    for cal_event in synthesis.get("calendar_events", []):
+        title = cal_event.get("title", "")
+        if not title:
+            continue
+        suggested_date = cal_event.get("suggested_date")
+        attendees = cal_event.get("attendees", [])
+
+        # Build description: include conversation context + attendee names
+        desc_parts = [f"Source: Sauron conversation {conversation_id[:8]}"]
+        if attendees:
+            desc_parts.append(f"Mentioned attendees: {', '.join(attendees)}")
+        cal_description = "\n".join(desc_parts)
+
+        cal_payload = {
+            "summary": title,
+            "description": cal_description,
+        }
+        # Only include start/end if we have a suggested date
+        if suggested_date:
+            # Extraction provides YYYY-MM-DD only (no time); use 9am-10am ET
+            # as a placeholder and flag it explicitly in the description.
+            cal_payload["start"] = f"{suggested_date}T09:00:00-05:00"
+            cal_payload["end"] = f"{suggested_date}T10:00:00-05:00"
+            desc_parts.append(
+                "Time placeholder inferred by Sauron; "
+                "original extraction only provided a date."
+            )
+            cal_payload["description"] = "\n".join(desc_parts)
+        else:
+            # No date → skip (can't create event without a time)
+            logger.debug(
+                f"Skipping calendar_event '{title}': no suggested_date"
+            )
+            continue
+
+        ok, err, _resp = _api_call(
+            "POST", f"{NETWORKING_APP_URL}/api/calendar/events", cal_payload
+        )
+        if ok:
+            successes.append(("calendar_event", cal_payload))
+        else:
+            secondary_errors.append(("calendar_event", cal_payload, err))
+
+    # Summarize calendar_events lane
+    cal_errs = [e for c, _, e in secondary_errors if c == "calendar_event"]
+    if cal_errs:
+        secondary_lane_results.append({"name": "calendar_events", "status": "failed", "reason": cal_errs[0]})
+    elif any(c == "calendar_event" for c, _ in successes):
+        secondary_lane_results.append({"name": "calendar_events", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "calendar_events", "status": "skipped_no_data"})
+
+        # Summarize status_changes lane
     sc_errs = [e for c, _, e in secondary_errors if c == "status_change_signal"]
     if sc_errs:
         secondary_lane_results.append({"name": "status_changes", "status": "failed", "reason": sc_errs[0]})
@@ -1009,6 +1192,93 @@ def _collect_scheduling_leads(
 # API call helper
 # ═══════════════════════════════════════════════════════════════
 
+
+
+
+
+
+def _route_interaction_participants(
+    interaction_id: str,
+    conversation_id: str,
+    primary_contact_id: str | None,
+    sel_conn,
+):
+    """Route interaction participants from speaker diarization.
+
+    Looks up speaker→contact mappings from unified_contacts (voice enrollment),
+    then POSTs each resolved speaker as an InteractionParticipant.
+
+    Does NOT create participants for unresolved speakers — skip over noise.
+    The primary contact (from interaction.contactId) is always added as
+    a participant with role=participant if resolved.
+    """
+    from sauron.db.connection import get_connection
+
+    # Collect speaker→contact mappings from the conversation
+    conn = get_connection()
+    try:
+        speaker_rows = conn.execute(
+            """SELECT DISTINCT t.speaker_label, uc.networking_app_contact_id, uc.canonical_name
+               FROM transcripts t
+               JOIN voice_match_log vml ON vml.conversation_id = t.conversation_id
+                   AND vml.speaker_label = t.speaker_label
+               JOIN unified_contacts uc ON uc.id = vml.matched_contact_id
+               WHERE t.conversation_id = ?
+                 AND uc.networking_app_contact_id IS NOT NULL""",
+            (conversation_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # Always include primary contact as participant
+    posted_contact_ids = set()
+    if primary_contact_id:
+        p_ok, _, _ = _api_call(
+            "POST",
+            f"{NETWORKING_APP_URL}/api/interaction-participants",
+            {
+                "interactionId": interaction_id,
+                "contactId": primary_contact_id,
+                "role": "participant",
+                "sourceSystem": "sauron",
+                "sourceId": conversation_id,
+            },
+        )
+        if p_ok:
+            posted_contact_ids.add(primary_contact_id)
+            logger.debug(f"Added primary contact as participant: {primary_contact_id[:8]}")
+
+    # Add other resolved speakers
+    for row in speaker_rows:
+        cid = row["networking_app_contact_id"]
+        if cid in posted_contact_ids:
+            continue
+        p_ok, _, _ = _api_call(
+            "POST",
+            f"{NETWORKING_APP_URL}/api/interaction-participants",
+            {
+                "interactionId": interaction_id,
+                "contactId": cid,
+                "role": "participant",
+                "speakerLabel": row["speaker_label"],
+                "sourceSystem": "sauron",
+                "sourceId": conversation_id,
+            },
+        )
+        if p_ok:
+            posted_contact_ids.add(cid)
+            logger.debug(
+                f"Added speaker {row['speaker_label']} ({row['canonical_name']}) "
+                f"as participant: {cid[:8]}"
+            )
+
+    if posted_contact_ids:
+        logger.info(
+            f"Routed {len(posted_contact_ids)} interaction participants "
+            f"for interaction {interaction_id[:8]}"
+        )
+
+
 def _api_call(
     method: str, url: str, payload: dict
 ) -> tuple[bool, str | None, dict | None]:
@@ -1022,6 +1292,8 @@ def _api_call(
             resp = httpx.post(url, json=payload, timeout=TIMEOUT)
         elif method == "PUT":
             resp = httpx.put(url, json=payload, timeout=TIMEOUT)
+        elif method == "PATCH":
+            resp = httpx.patch(url, json=payload, timeout=TIMEOUT)
         elif method == "GET":
             resp = httpx.get(url, timeout=TIMEOUT)
         else:
@@ -1380,7 +1652,13 @@ def _resolve_contact_id_for_entity(
     """Resolve a Networking App contact ID for an entity name.
 
     Uses local DB lookup (contact bridge), NOT HTTP name-string search.
-    Falls back to the conversation's primary contact ID.
+
+    IMPORTANT (Step F): Does NOT fall back to the conversation's primary
+    contact. If the entity name cannot be resolved, returns None.
+    The fallback_contact_id is ONLY used when entity_name is empty/None
+    (i.e., no entity was specified, so the caller explicitly wants the
+    primary contact). This prevents misattributing data about "person X"
+    to the primary contact just because X couldn't be resolved.
     """
     if not entity_name:
         return fallback_contact_id
@@ -1396,7 +1674,10 @@ def _resolve_contact_id_for_entity(
         ).fetchone()
         if row and row["networking_app_contact_id"]:
             return row["networking_app_contact_id"]
-        return fallback_contact_id
+        # Step F: Return None on miss — do NOT fall back to primary.
+        # Callers must handle None (skip the object) rather than
+        # silently misattribute to the conversation's primary contact.
+        return None
     finally:
         conn.close()
 
@@ -1460,8 +1741,8 @@ def _update_contact_field_null_only(
     field already has a non-null/non-empty value. If it does, the
     update is skipped to avoid overwriting user-curated data.
 
-    Preserves array fields (categories, tags) that the PUT handler
-    would otherwise wipe via its || [] fallback.
+    Uses PATCH (partial update) to set only the target field without
+    affecting other contact fields.
 
     Returns:
         (True, None)  — updated successfully
@@ -1531,52 +1812,18 @@ def _update_contact_field_null_only(
         )
         return None, None
 
-    # The Networking App only has PUT (no PATCH). Prisma's update()
-    # sets any field not in the body to undefined → null, which would
-    # wipe every other field on the contact. We must send the full
-    # contact back with only our target field changed.
+    # PATCH: send only the field we want to update.
+    # The Networking App now supports PATCH /api/contacts/[id] which
+    # updates only provided fields without wiping unspecified ones.
     #
-    # Parse array fields from JSON strings so they survive the round-trip.
-    cats = contact.get("categories")
-    if isinstance(cats, str):
-        try:
-            cats = _json.loads(cats)
-        except (ValueError, TypeError):
-            cats = []
-    tags = contact.get("tags")
-    if isinstance(tags, str):
-        try:
-            tags = _json.loads(tags)
-        except (ValueError, TypeError):
-            tags = []
-
-    # Build full body from fetched contact, overriding only the target field
-    update_body = {
-        "name": contact.get("name"),
-        "title": contact.get("title"),
-        "organization": contact.get("organization"),
-        "email": contact.get("email"),
-        "phone": contact.get("phone"),
-        "linkedinUrl": contact.get("linkedinUrl"),
-        "twitterHandle": contact.get("twitterHandle"),
-        "personalWebsite": contact.get("personalWebsite"),
-        "tier": contact.get("tier"),
-        "categories": cats or [],
-        "tags": tags or [],
-        "targetCadenceDays": contact.get("targetCadenceDays"),
-        "status": contact.get("status"),
-        "contactType": contact.get("contactType"),
-        "introductionPathway": contact.get("introductionPathway"),
-        "connectionToHawleyOrbit": contact.get("connectionToHawleyOrbit"),
-        "whyTheyMatter": contact.get("whyTheyMatter"),
-        "notes": contact.get("notes"),
-    }
-    update_body[net_field] = value
-
+    # SCOPE: PATCH is for lightweight flat-field enrichment only
+    # (title, organization, email, phone, social links, etc.).
+    # Structured role/affiliation changes must go through the
+    # ContactAffiliation lane, not direct contact patching.
     ok, err, _resp = _api_call(
-        "PUT",
+        "PATCH",
         f"{NETWORKING_APP_URL}/api/contacts/{contact_id}",
-        update_body,
+        {net_field: value},
     )
     if ok:
         logger.info(f"Updated {entity_name}.{net_field} (was null)")
