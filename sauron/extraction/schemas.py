@@ -237,10 +237,21 @@ class StatusChange(BaseModel):
 
 
 class OrgIntelligence(BaseModel):
-    """Organization-level intelligence: restructuring, hiring, funding, policy changes."""
+    """Organization-level intelligence: restructuring, hiring, funding, policy changes.
+
+    intel_type includes: restructuring, hiring, funding, policy_change, acquisition,
+    expansion, industry_mention, org_relationship.
+
+    For org_relationship: related_org and relationship_type preserve the structured
+    relationship. This is temporarily modeled as an OrganizationSignal in Networking;
+    if org-to-org relationships become important later, they may deserve a first-class model.
+    """
     organization: str
-    intel_type: str  # "restructuring", "hiring", "funding", "policy_change", "acquisition", "expansion"
+    intel_type: str  # restructuring | hiring | funding | policy_change | acquisition | expansion | industry_mention | org_relationship
     details: str
+    industry: str | None = None  # for industry_mention: normalized sector label
+    related_org: str | None = None  # for org_relationship: the other organization
+    relationship_type: str | None = None  # for org_relationship: acquisition | partnership | subsidiary | competitor | regulator_of
     mentioned_by: str | None = None  # contact who mentioned it
     source_claim_id: str | None = None
 
@@ -252,6 +263,26 @@ class ProvenanceObservation(BaseModel):
     discovered_via: str | None = None      # "conference", "referral", "cold_outreach", "mutual_friend"
     context: str = ""                      # brief description of how they met/connected
     source_claim_id: str | None = None
+
+
+
+
+class AffiliationMention(BaseModel):
+    """A person-organization-role triple detected in conversation.
+
+    role_type is open-ended — examples include executive, staff, consultant,
+    board, advisor, partner, counsel, commissioner, chair, founder, investor,
+    contractor, etc. Do NOT restrict to a closed enum.
+    """
+    contact_name: str
+    organization: str
+    title: str | None = None
+    department: str | None = None
+    role_type: str | None = None  # open-ended: executive, staff, consultant, board, advisor, partner, etc.
+    is_current: bool = True
+    change_type: str | None = None  # new_role | departure | promotion | null=static mention
+    source_claim_id: str | None = None
+    confidence: float = 0.7
 
 
 class SynthesisResult(BaseModel):
@@ -289,6 +320,7 @@ class SynthesisResult(BaseModel):
     provenance_observations: list[ProvenanceObservation] = Field(default_factory=list)
     status_changes: list[StatusChange] = Field(default_factory=list)
     org_intelligence: list[OrgIntelligence] = Field(default_factory=list)
+    affiliation_mentions: list[AffiliationMention] = Field(default_factory=list)
 
     # What changed per person
     what_changed: dict[str, str] = Field(

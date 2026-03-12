@@ -388,6 +388,9 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         # ── Step 15: v18 routing summaries (degraded-state visibility) ──
         _run_v18_routing_summaries(conn)
 
+        # Wave 2: affiliation cache
+        _run_v19_affiliation_cache(conn)
+
         conn.commit()
         logger.info("Migration complete.")
 
@@ -614,6 +617,49 @@ def _run_v18_routing_summaries(conn):
         logger.info("  routing_summaries table created")
     else:
         logger.info("  routing_summaries table already exists")
+
+
+
+def _run_v19_affiliation_cache(conn):
+    """v19 (Wave 2): Add contact_affiliations_cache table.
+
+    This is a MIRROR of current Networking App affiliation state for synced contacts.
+    On each sync per contact:
+      - upsert affiliations present in the Networking response
+      - delete stale cache rows for that contact no longer in the response
+    System of record remains the Networking App.
+    """
+    logger.info("Running v19 migration (contact_affiliations_cache table)...")
+    if not _table_exists(conn, "contact_affiliations_cache"):
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS contact_affiliations_cache (
+                id TEXT PRIMARY KEY,
+                unified_contact_id TEXT NOT NULL REFERENCES unified_contacts(id),
+                networking_affiliation_id TEXT NOT NULL UNIQUE,
+                networking_org_id TEXT NOT NULL,
+                org_name TEXT NOT NULL,
+                org_industry TEXT,
+                title TEXT,
+                department TEXT,
+                role_type TEXT,
+                is_current BOOLEAN DEFAULT 1,
+                start_date TEXT,
+                end_date TEXT,
+                resolution_source TEXT,
+                synced_at DATETIME DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_cac_contact ON contact_affiliations_cache(unified_contact_id);
+            CREATE INDEX IF NOT EXISTS idx_cac_org ON contact_affiliations_cache(networking_org_id);
+            CREATE INDEX IF NOT EXISTS idx_cac_org_name ON contact_affiliations_cache(org_name);
+        """)
+        logger.info("  contact_affiliations_cache table created")
+    else:
+        # Ensure resolution_source column exists (idempotent)
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(contact_affiliations_cache)").fetchall()]
+        if "resolution_source" not in cols:
+            conn.execute("ALTER TABLE contact_affiliations_cache ADD COLUMN resolution_source TEXT")
+            logger.info("  Added resolution_source column to contact_affiliations_cache")
+        logger.info("  contact_affiliations_cache table already exists")
 
 
 if __name__ == "__main__":

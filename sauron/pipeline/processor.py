@@ -1114,6 +1114,7 @@ def _run_deep_extraction_only(
                 triage=triage,
                 existing_beliefs=existing_beliefs,
                 amendment_context=amendment_context,
+                conversation_id=conversation_id,
             )
 
             conn.execute(

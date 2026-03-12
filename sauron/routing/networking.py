@@ -152,6 +152,7 @@ def _execute_routing(
     for _cat2_key in (
         "status_changes", "org_intelligence", "provenance_observations",
         "per_speaker_vocal_insights", "what_changed", "vocal_intelligence_summary",
+        "affiliation_mentions",  # Wave 2
     ):
         in_synth = _cat2_key in synthesis
         in_top = _cat2_key in extraction
@@ -600,11 +601,27 @@ def _execute_routing(
         if not org_name:
             continue
 
+        # Build description: for org_relationship, preserve structured fields
+        # in the description AND pass them as separate payload fields so
+        # Networking can use them downstream if/when org relationships
+        # get promoted to a first-class model.
+        oi_description = oi.get("details", "")
+        if oi.get("intel_type") == "org_relationship" and oi.get("related_org"):
+            oi_description = (
+                f"{oi.get('details', '')} "
+                f"[related_org={oi.get('related_org')}, "
+                f"relationship_type={oi.get('relationship_type', 'unknown')}]"
+            ).strip()
+
         oi_payload = {
             "organizationName": org_name,
             "signalType": oi.get("intel_type", "intelligence"),
             "title": f"{org_name}: {oi.get('intel_type', 'intelligence')}",
-            "description": oi.get("details", ""),
+            "description": oi_description,
+            # Wave 2 expanded fields (Step 8D)
+            "industry": oi.get("industry"),  # for industry_mention: triggers side-effect
+            "relatedOrg": oi.get("related_org"),  # for org_relationship: structured field
+            "relationshipType": oi.get("relationship_type"),  # for org_relationship
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
             "sourceClaimId": oi.get("source_claim_id"),
@@ -635,6 +652,13 @@ def _execute_routing(
     )
     successes.extend(prof_ok)
     secondary_errors.extend(prof_errs)
+
+    # 15. Affiliation mentions (secondary -- non-fatal, Wave 2)
+    aff_ok, aff_errs = _route_affiliations(
+        conversation_id, synthesis, networking_app_contact_id, sel_conn
+    )
+    successes.extend(aff_ok)
+    secondary_errors.extend(aff_errs)
 
     # Summarize status_changes lane
     sc_errs = [e for c, _, e in secondary_errors if c == "status_change_signal"]
@@ -671,6 +695,15 @@ def _execute_routing(
         secondary_lane_results.append({"name": "profile_intelligence", "status": "success"})
     else:
         secondary_lane_results.append({"name": "profile_intelligence", "status": "skipped_no_data"})
+
+    # Summarize affiliations lane (Wave 2)
+    aff_errs_list = [e for c, _, e in secondary_errors if c == "affiliation"]
+    if aff_errs_list:
+        secondary_lane_results.append({"name": "affiliations", "status": "failed", "reason": aff_errs_list[0]})
+    elif any(c == "affiliation" for c, _ in successes):
+        secondary_lane_results.append({"name": "affiliations", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "affiliations", "status": "skipped_no_data"})
 
     # Collect pending entities
     pending_entities = []
@@ -1190,6 +1223,79 @@ def _route_profile_intelligence(
             sec_errors.append(("vocal_summary", payload, err))
 
     return successes, sec_errors
+
+def _route_affiliations(
+    conversation_id: str,
+    synthesis: dict,
+    networking_app_contact_id: str | None,
+    sel_conn=None,
+) -> tuple[list[tuple], list[tuple]]:
+    """Lane 15 (Wave 2): Route affiliation mentions to Networking App.
+
+    Sends organizationName (not ID) -- Networking's orgResolver handles resolution.
+    contactId resolved via synthesis_entity_links or fallback to primary contact.
+    Dedup by provenance triple (sourceSystem + sourceId + sourceClaimId).
+    resolutionSource from org resolution persists on resulting ContactAffiliation.
+
+    Secondary lane -- non-fatal.
+    """
+    successes = []
+    sec_errors = []
+
+    for idx, aff in enumerate(synthesis.get("affiliation_mentions", [])):
+        contact_name = aff.get("contact_name", "")
+        org_name = aff.get("organization", "")
+        if not contact_name or not org_name:
+            continue
+
+        # Resolve contact ID
+        if sel_conn is not None:
+            cid = _resolve_with_synthesis_links(
+                sel_conn, conversation_id, "affiliation_mention", idx,
+                "contact_name", contact_name, networking_app_contact_id,
+            )
+            if cid == _SKIP_SENTINEL:
+                logger.debug(f"Skipping affiliation[{idx}]: person marked as skipped")
+                continue
+        else:
+            cid = _resolve_contact_id_for_entity(
+                contact_name, networking_app_contact_id
+            )
+
+        if not cid:
+            # Hold for pending entity if provisional
+            if sel_conn:
+                blocked = _find_provisional_entity_id(sel_conn, contact_name)
+                if blocked:
+                    _hold_pending_route(
+                        sel_conn, conversation_id, "affiliation",
+                        aff, blocked,
+                    )
+                    logger.info(f"Held affiliation[{idx}]: blocked on {blocked[:8]}")
+            continue
+
+        payload = {
+            "contactId": cid,
+            "organizationName": org_name,  # Networking resolves via orgResolver
+            "title": aff.get("title"),
+            "department": aff.get("department"),
+            "roleType": aff.get("role_type"),  # open-ended, not enum-restricted
+            "isCurrent": aff.get("is_current", True),
+            "sourceSystem": "sauron",
+            "sourceId": conversation_id,
+            "sourceClaimId": aff.get("source_claim_id"),
+        }
+
+        ok, err = _api_call(
+            "POST", f"{NETWORKING_APP_URL}/api/contact-affiliations", payload
+        )
+        if ok:
+            successes.append(("affiliation", payload))
+        else:
+            sec_errors.append(("affiliation", payload, err))
+
+    return successes, sec_errors
+
 
 def _find_provisional_entity_id(conn, name: str) -> str | None:
     """Look up a provisional (unconfirmed) unified_contact by name."""

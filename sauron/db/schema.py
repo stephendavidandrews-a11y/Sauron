@@ -118,6 +118,28 @@ CREATE TABLE IF NOT EXISTS vocal_baselines (
 
 -- Speaker Identification
 
+
+-- Wave 2: Affiliation cache (mirror of Networking App state)
+CREATE TABLE IF NOT EXISTS contact_affiliations_cache (
+    id TEXT PRIMARY KEY,
+    unified_contact_id TEXT NOT NULL REFERENCES unified_contacts(id),
+    networking_affiliation_id TEXT NOT NULL UNIQUE,
+    networking_org_id TEXT NOT NULL,
+    org_name TEXT NOT NULL,
+    org_industry TEXT,
+    title TEXT,
+    department TEXT,
+    role_type TEXT,
+    is_current BOOLEAN DEFAULT 1,
+    start_date TEXT,
+    end_date TEXT,
+    resolution_source TEXT,
+    synced_at DATETIME DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cac_contact ON contact_affiliations_cache(unified_contact_id);
+CREATE INDEX IF NOT EXISTS idx_cac_org ON contact_affiliations_cache(networking_org_id);
+CREATE INDEX IF NOT EXISTS idx_cac_org_name ON contact_affiliations_cache(org_name);
+
 CREATE TABLE IF NOT EXISTS voice_profiles (
     id TEXT PRIMARY KEY,
     contact_id TEXT,

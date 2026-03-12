@@ -138,10 +138,26 @@ Output valid JSON matching this schema:
   "org_intelligence": [
     {
       "organization": "Organization Name",
-      "intel_type": "restructuring | hiring | funding | policy_change | acquisition | expansion",
+      "intel_type": "restructuring | hiring | funding | policy_change | acquisition | expansion | industry_mention | org_relationship",
       "details": "Description of the organizational intelligence",
+      "industry": "Normalized sector label for industry_mention type, or null",
+      "related_org": "Other organization name for org_relationship type, or null",
+      "relationship_type": "acquisition | partnership | subsidiary | competitor | regulator_of | null",
       "mentioned_by": "Contact name who mentioned it, or null",
       "source_claim_id": "claim ID if traceable"
+    }
+  ],
+  "affiliation_mentions": [
+    {
+      "contact_name": "Full Name",
+      "organization": "Organization Name",
+      "title": "Their title/role at the org, or null",
+      "department": "Department if mentioned, or null",
+      "role_type": "Open-ended: executive, staff, consultant, board, advisor, partner, counsel, commissioner, chair, founder, investor, contractor, etc.",
+      "is_current": true,
+      "change_type": "new_role | departure | promotion | null (static mention)",
+      "source_claim_id": "claim ID if traceable",
+      "confidence": 0.7
     }
   ],
   "context_classification": "confirmed or refined classification"
@@ -158,6 +174,17 @@ Key instructions:
 - What-changed: per person, summarize what's new/different compared to previous context.
 - Sentiment: assess the overall emotional tone of the conversation. "warm" = friendly/personal, "neutral" = straightforward, "transactional" = business-only, "tense" = conflict/stress, "enthusiastic" = high energy/excitement.
 - Relationship delta: assess whether the relationship moved. "strengthened" = closer/deeper, "maintained" = stable, "weakened" = strained/cooled, "new" = first meaningful interaction.
+- Affiliation mentions: Extract when someone's organizational role is mentioned or implied.
+  "John is now at Goldman" = affiliation with change_type="new_role".
+  "Sarah from the SEC" = static mention (change_type=null).
+  role_type is open-ended — use whatever fits: executive, staff, consultant, board, advisor, partner, counsel, commissioner, chair, founder, investor, contractor, etc.
+  For Stephen Andrews: keep extraction conservative. Only emit Stephen's affiliation mentions when clearly relevant to system state or routing. Do not flood output with obvious default facts.
+  Overlap with status_changes is OK — status_changes captures the event, affiliation_mentions captures the structured triple.
+- Org intelligence expansion:
+  "CME is a derivatives exchange" = industry_mention with industry="Market Infrastructure"
+  "CME acquired NEX Group" = org_relationship with related_org="NEX Group", relationship_type="acquisition"
+  For org_relationship: ALWAYS include the structured related_org and relationship_type fields. Do not flatten into free text only.
+  Keep extraction conservative — only emit when clearly grounded in claims.
 - Be specific, not generic. "Heath seemed stressed" is bad. "Heath's jitter +45% when discussing compliance deadline (claim_007) suggests elevated stress about timeline" is good.
 """
 
@@ -190,6 +217,7 @@ def synthesize(
     triage: TriageResult | None = None,
     existing_beliefs: list[dict] | None = None,
     amendment_context: str = "",
+    conversation_id: int | None = None,
 ) -> tuple[SynthesisResult, dict]:
     """Run Opus synthesis on claims + vocal analysis.
 
@@ -216,6 +244,10 @@ def synthesize(
         calendar_context, triage, existing_beliefs
     )
 
+    # Wave 2: Inject known affiliation context for contacts in this conversation
+    aff_context = _build_affiliation_context(conversation_id)
+    if aff_context:
+        user_content = f"## Known Affiliations\n{aff_context}\n\n---\n\n{user_content}"
     logger.info("Running Opus synthesis...")
     response = client.messages.create(
         model=EXTRACTION_MODEL,
@@ -283,6 +315,69 @@ def solo_extract(
     )
 
     return result, usage
+
+
+
+def _build_affiliation_context(conversation_id: int | None = None) -> str:
+    """Build affiliation context string for contacts in a conversation.
+
+    Only includes affiliations for contacts actually present in the conversation.
+    Prioritizes current affiliations over former ones.
+    Does NOT dump unrelated org history into every prompt.
+
+    Returns a concise block like:
+      Known affiliations:
+      - John Smith: VP of Trading at Goldman Sachs (Market Infrastructure)
+      - Sarah Jones: Commissioner at CFTC (Government/Regulatory)
+    """
+    if conversation_id is None:
+        return ""
+
+    try:
+        from sauron.db.connection import get_connection
+        conn = get_connection()
+
+        # Get contacts involved in this conversation (from claims)
+        contacts = conn.execute("""
+            SELECT DISTINCT uc.id, uc.canonical_name
+            FROM event_claims ec
+            JOIN unified_contacts uc ON ec.subject_entity_id = uc.id
+            WHERE ec.conversation_id = ?
+        """, (conversation_id,)).fetchall()
+
+        if not contacts:
+            conn.close()
+            return ""
+
+        lines = []
+        for c in contacts:
+            affs = conn.execute("""
+                SELECT org_name, org_industry, title, role_type, is_current
+                FROM contact_affiliations_cache
+                WHERE unified_contact_id = ?
+                ORDER BY is_current DESC, synced_at DESC
+            """, (c["id"],)).fetchall()
+
+            # Prioritize current affiliations; include at most 2 per person
+            shown = 0
+            for a in affs:
+                if shown >= 2:
+                    break
+                role_str = a["title"] or a["role_type"] or "affiliated"
+                industry_str = f" ({a['org_industry']})" if a["org_industry"] else ""
+                current_str = "" if a["is_current"] else " [former]"
+                lines.append(f"- {c['canonical_name']}: {role_str} at {a['org_name']}{industry_str}{current_str}")
+                shown += 1
+
+        conn.close()
+
+        if not lines:
+            return ""
+
+        return "Known affiliations:\n" + "\n".join(lines)
+    except Exception:
+        logger.debug("Could not build affiliation context", exc_info=True)
+        return ""
 
 
 def _build_synthesis_context(

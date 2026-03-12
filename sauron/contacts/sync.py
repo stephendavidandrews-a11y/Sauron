@@ -118,6 +118,13 @@ def sync_contacts_from_networking_app() -> dict:
         conn.commit()
         logger.info(f"Contact sync complete: {stats}")
 
+        # Sync affiliations (cache mirror of Networking App state)
+        try:
+            aff_stats = _sync_affiliations(conn)
+            stats["affiliations"] = aff_stats
+        except Exception:
+            logger.exception("Failed to sync affiliations")
+
         # Release any pending routes for entities that now have networking_app_contact_id
         try:
             from sauron.routing.routing_log import release_pending_routes, get_pending_routes_for_entity
@@ -145,6 +152,106 @@ def sync_contacts_from_networking_app() -> dict:
     finally:
         conn.close()
 
+    return stats
+
+
+
+def _sync_affiliations(conn) -> dict:
+    """Pull affiliations from Networking App for all synced contacts.
+
+    Mirror semantics: this is a cache of current Networking affiliation state.
+    On each sync per contact:
+      - upsert affiliations present in the Networking response
+      - DELETE stale cache rows for that contact no longer in the response
+    System of record remains the Networking App.
+    """
+    stats = {"synced": 0, "skipped": 0, "stale_deleted": 0}
+
+    contacts = conn.execute(
+        "SELECT id, networking_app_contact_id FROM unified_contacts WHERE networking_app_contact_id IS NOT NULL"
+    ).fetchall()
+
+    for contact in contacts:
+        uc_id = contact["id"]
+        nc_id = contact["networking_app_contact_id"]
+
+        try:
+            resp = httpx.get(
+                f"{NETWORKING_APP_URL}/api/contact-affiliations",
+                params={"contactId": nc_id},
+                timeout=TIMEOUT,
+            )
+            if resp.status_code != 200:
+                stats["skipped"] += 1
+                continue
+
+            affiliations = resp.json()
+        except Exception:
+            logger.exception(f"Failed to fetch affiliations for contact {nc_id}")
+            stats["skipped"] += 1
+            continue
+
+        # Track which networking affiliation IDs are still current
+        current_aff_ids = set()
+
+        for aff in affiliations:
+            aff_id = aff.get("id")
+            if not aff_id:
+                continue
+            current_aff_ids.add(aff_id)
+
+            org = aff.get("organization") or {}
+            org_name = org.get("name", "") if isinstance(org, dict) else ""
+            org_id = org.get("id", "") if isinstance(org, dict) else ""
+            org_industry = org.get("industry") if isinstance(org, dict) else None
+
+            conn.execute("""
+                INSERT INTO contact_affiliations_cache
+                (id, unified_contact_id, networking_affiliation_id, networking_org_id,
+                 org_name, org_industry, title, department, role_type, is_current,
+                 start_date, end_date, resolution_source, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(networking_affiliation_id) DO UPDATE SET
+                    org_name = excluded.org_name,
+                    org_industry = excluded.org_industry,
+                    title = excluded.title,
+                    department = excluded.department,
+                    role_type = excluded.role_type,
+                    is_current = excluded.is_current,
+                    start_date = excluded.start_date,
+                    end_date = excluded.end_date,
+                    resolution_source = excluded.resolution_source,
+                    synced_at = datetime('now')
+            """, (
+                str(uuid.uuid4()), uc_id, aff_id, org_id,
+                org_name, org_industry,
+                aff.get("title"), aff.get("department"), aff.get("roleType"),
+                aff.get("isCurrent", True),
+                aff.get("startDate"), aff.get("endDate"),
+                aff.get("resolutionSource"),
+            ))
+            stats["synced"] += 1
+
+        # Mirror rule: delete stale cache rows for this contact
+        # (affiliations that no longer exist in Networking response)
+        if current_aff_ids:
+            placeholders = ",".join("?" for _ in current_aff_ids)
+            deleted = conn.execute(
+                f"""DELETE FROM contact_affiliations_cache
+                    WHERE unified_contact_id = ?
+                    AND networking_affiliation_id NOT IN ({placeholders})""",
+                (uc_id, *current_aff_ids),
+            ).rowcount
+        else:
+            # No affiliations returned — delete all cached for this contact
+            deleted = conn.execute(
+                "DELETE FROM contact_affiliations_cache WHERE unified_contact_id = ?",
+                (uc_id,),
+            ).rowcount
+        stats["stale_deleted"] += deleted
+
+    conn.commit()
+    logger.info(f"Affiliation sync complete: {stats}")
     return stats
 
 
