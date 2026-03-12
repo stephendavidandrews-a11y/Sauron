@@ -496,6 +496,8 @@ def _execute_routing(
         secondary_lane_results.append({"name": "interests", "status": "failed", "reason": int_errs[0]})
     elif any(c == "interest" for c, _ in successes):
         secondary_lane_results.append({"name": "interests", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "interests", "status": "skipped", "reason": "no data"})
 
     # Summarize activities lane
     act_errs = [e for c, _, e in secondary_errors if c == "activity"]
@@ -503,6 +505,8 @@ def _execute_routing(
         secondary_lane_results.append({"name": "activities", "status": "failed", "reason": act_errs[0]})
     elif any(c == "activity" for c, _ in successes):
         secondary_lane_results.append({"name": "activities", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "activities", "status": "skipped", "reason": "no data"})
 
     # Summarize referenced_resources lane
     res_errs = [e for c, _, e in secondary_errors if c == "referenced_resource"]
@@ -510,6 +514,8 @@ def _execute_routing(
         secondary_lane_results.append({"name": "referenced_resources", "status": "failed", "reason": res_errs[0]})
     elif any(c == "referenced_resource" for c, _ in successes):
         secondary_lane_results.append({"name": "referenced_resources", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "referenced_resources", "status": "skipped", "reason": "no data"})
 
     # 10b. Status changes (secondary — non-fatal)
     _sc_list = synthesis.get("status_changes", [])
@@ -605,6 +611,8 @@ def _execute_routing(
         secondary_lane_results.append({"name": "status_changes", "status": "failed", "reason": sc_errs[0]})
     elif any(c == "status_change_signal" for c, _ in successes):
         secondary_lane_results.append({"name": "status_changes", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "status_changes", "status": "skipped", "reason": "no data"})
 
     # Summarize org_intelligence lane
     oi_errs = [e for c, _, e in secondary_errors if c == "org_intel_signal"]
@@ -612,6 +620,8 @@ def _execute_routing(
         secondary_lane_results.append({"name": "org_intelligence", "status": "failed", "reason": oi_errs[0]})
     elif any(c == "org_intel_signal" for c, _ in successes):
         secondary_lane_results.append({"name": "org_intelligence", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "org_intelligence", "status": "skipped", "reason": "no data"})
 
     # Summarize provenance lane
     prov_errs_list = [e for c, _, e in secondary_errors if c == "provenance"]
@@ -619,6 +629,8 @@ def _execute_routing(
         secondary_lane_results.append({"name": "provenance", "status": "failed", "reason": prov_errs_list[0]})
     elif any(c == "provenance" for c, _ in successes):
         secondary_lane_results.append({"name": "provenance", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "provenance", "status": "skipped", "reason": "no data"})
 
     # Summarize profile_intelligence lane
     prof_errs_list = [e for c, _, e in secondary_errors if c == "profile_intelligence"]
@@ -626,6 +638,8 @@ def _execute_routing(
         secondary_lane_results.append({"name": "profile_intelligence", "status": "failed", "reason": prof_errs_list[0]})
     elif any(c == "profile_intelligence" for c, _ in successes):
         secondary_lane_results.append({"name": "profile_intelligence", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "profile_intelligence", "status": "skipped", "reason": "no data"})
 
     # Collect pending entities
     pending_entities = []
