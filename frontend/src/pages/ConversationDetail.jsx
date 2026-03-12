@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
-import { fetchRoutingSummary, fetchPendingRoutes } from '../api';
+import { fetchRoutingSummary, fetchPendingRoutes, fetchGraphEdges, confirmGraphEdge, dismissGraphEdge, updateGraphEdge } from '../api';
 
 export const C = {
   bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
@@ -341,7 +341,10 @@ export default function ConversationDetail() {
       {/* Layer 2: Relational references (unchanged) */}
       <RelationalReferencesBanner key={`rel-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} />
 
-      {/* Layer 3: Routing preview */}
+      {/* Layer 3: Graph edge review */}
+      <GraphEdgeReviewBanner key={`edges-${refreshKey}`} conversationId={id} refreshKey={refreshKey} />
+
+      {/* Layer 4: Routing preview */}
       <RoutingPreview key={`routing-${refreshKey}`} conversationId={id} refreshKey={refreshKey} />
 
       {/* Tabs */}
@@ -2468,8 +2471,9 @@ export function PeopleReviewBanner({
   const [linkSearch, setLinkSearch] = useState('');
   const [linkResults, setLinkResults] = useState([]);
   const [editingName, setEditingName] = useState(null);
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', aliases: '' });
+  const [editForm, setEditForm] = useState({ name: '', organization: '', title: '', email: '', phone: '', aliases: '', notes: '' });
   const [actionLoading, setActionLoading] = useState(null);
+  const [actionError, setActionError] = useState(null);
 
   const fetchPeople = useCallback(() => {
     if (initialPeople) return;
@@ -2590,31 +2594,66 @@ export function PeopleReviewBanner({
 
   const startEdit = (person) => {
     setEditingName(person.original_name);
+    setActionError(null);
     setEditForm({
       name: person.canonical_name || person.original_name || '',
+      organization: '',
+      title: '',
       email: '',
       phone: '',
       aliases: '',
+      notes: '',
     });
   };
 
   const handleCreateContact = async (person) => {
-    if (!person.entity_id) return;
     setActionLoading(person.original_name);
+    setActionError(null);
     try {
-      await confirmProvisionalFn(
-        person.entity_id,
-        editForm.name || null,
-        false,
-        null,
-        editForm.email || null,
-        editForm.phone || null,
-        editForm.aliases || null,
-      );
+      if (person.entity_id && person.is_provisional) {
+        // Provisional contact: confirm with richer fields
+        await confirmProvisionalFn(
+          person.entity_id,
+          editForm.name || null,
+          false,
+          null,
+          editForm.email || null,
+          editForm.phone || null,
+          editForm.aliases || null,
+        );
+      } else {
+        // Unresolved / no entity_id: create brand new contact
+        const result = await api.createContact({
+          canonical_name: editForm.name.trim(),
+          original_name: person.original_name || undefined,
+          organization: editForm.organization || undefined,
+          title: editForm.title || undefined,
+          email: editForm.email || undefined,
+          phone: editForm.phone || undefined,
+          aliases: editForm.aliases || undefined,
+          notes: editForm.notes || undefined,
+          push_to_networking_app: true,
+          source_conversation_id: conversationId,
+        });
+        if (result && result.existing_id) {
+          setActionError('A contact with that name already exists. Use Link to Existing instead.');
+          setActionLoading(null);
+          return;
+        }
+      }
       setEditingName(null);
+      setActionError(null);
       fetchPeople();
       if (onResolved) onResolved();
-    } catch (e) { console.error('Create contact failed', e); }
+    } catch (e) {
+      const msg = e.message || 'Create contact failed';
+      if (msg.includes('409')) {
+        setActionError('A contact with that name already exists. Use Link to Existing instead.');
+      } else {
+        setActionError(msg);
+      }
+      console.error('Create contact failed', e);
+    }
     setActionLoading(null);
   };
 
@@ -2689,7 +2728,7 @@ export function PeopleReviewBanner({
         opacity: isLoading ? 0.6 : (isSkipped || isDismissed) ? 0.5 : 1,
       }}>
         {isEditing ? (
-          /* Create contact edit form */
+          /* Create contact edit form — richer fields */
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
               <div>
@@ -2697,6 +2736,18 @@ export function PeopleReviewBanner({
                 <input value={editForm.name}
                   onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
                   style={inputStyle} placeholder="First Last" />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: C.textDim, display: 'block', marginBottom: 2 }}>Organization</label>
+                <input value={editForm.organization}
+                  onChange={e => setEditForm(f => ({ ...f, organization: e.target.value }))}
+                  style={inputStyle} placeholder="Company name" />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: C.textDim, display: 'block', marginBottom: 2 }}>Title</label>
+                <input value={editForm.title}
+                  onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
+                  style={inputStyle} placeholder="Job title" />
               </div>
               <div>
                 <label style={{ fontSize: 11, color: C.textDim, display: 'block', marginBottom: 2 }}>Email</label>
@@ -2717,15 +2768,27 @@ export function PeopleReviewBanner({
                   style={inputStyle} placeholder="Nick; Nickname" />
               </div>
             </div>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 11, color: C.textDim, display: 'block', marginBottom: 2 }}>Notes</label>
+              <input value={editForm.notes}
+                onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+                style={inputStyle} placeholder="Optional notes" />
+            </div>
+            {actionError && (
+              <div style={{
+                padding: '6px 10px', marginBottom: 8, fontSize: 12, borderRadius: 4,
+                background: C.danger + '18', color: C.danger, border: '1px solid ' + C.danger + '33',
+              }}>{actionError}</div>
+            )}
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
               <button onClick={() => handleCreateContact(person)}
-                disabled={!editForm.name.trim()}
+                disabled={!editForm.name.trim() || actionLoading === person.original_name}
                 style={{
                   padding: '5px 14px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
                   background: C.success + '22', color: C.success, border: '1px solid ' + C.success + '44',
-                  opacity: editForm.name.trim() ? 1 : 0.4,
-                }}>Create Contact</button>
-              <button onClick={() => setEditingName(null)}
+                  opacity: editForm.name.trim() && actionLoading !== person.original_name ? 1 : 0.4,
+                }}>{actionLoading === person.original_name ? 'Creating...' : 'Create Contact'}</button>
+              <button onClick={() => { setEditingName(null); setActionError(null); }}
                 style={{
                   padding: '5px 14px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
                   background: C.card, color: C.textDim, border: '1px solid ' + C.border,
@@ -2966,6 +3029,249 @@ const OBJECT_TYPE_LABELS = {
   my_commitments: 'My Commitments',
   follow_ups: 'Follow-Ups',
 };
+
+
+// -- Graph Edge Review Banner --
+export function GraphEdgeReviewBanner({ conversationId, refreshKey }) {
+  const [edges, setEdges] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editType, setEditType] = useState('');
+  const [actionLoading, setActionLoading] = useState(null);
+
+  useEffect(() => {
+    fetchGraphEdges(conversationId)
+      .then(d => setEdges(d.edges || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [conversationId, refreshKey]);
+
+  if (loading) return null;
+
+  const pending = edges.filter(e => e.review_status === 'pending');
+  const confirmed = edges.filter(e => e.review_status === 'confirmed');
+  const dismissed = edges.filter(e => e.review_status === 'dismissed');
+
+  const handleConfirm = async (edgeId) => {
+    setActionLoading(edgeId);
+    try {
+      const updated = await confirmGraphEdge(edgeId);
+      setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, ...updated } : e));
+    } catch (e) { console.error('Confirm edge failed', e); }
+    setActionLoading(null);
+  };
+
+  const handleDismiss = async (edgeId) => {
+    setActionLoading(edgeId);
+    try {
+      const updated = await dismissGraphEdge(edgeId);
+      setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, ...updated } : e));
+    } catch (e) { console.error('Dismiss edge failed', e); }
+    setActionLoading(null);
+  };
+
+  const handleSaveType = async (edgeId) => {
+    if (!editType.trim()) return;
+    setActionLoading(edgeId);
+    try {
+      const updated = await updateGraphEdge(edgeId, { relationship_type: editType.trim(), review_status: 'confirmed' });
+      setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, ...updated } : e));
+      setEditingId(null);
+      setEditType('');
+    } catch (e) { console.error('Update edge failed', e); }
+    setActionLoading(null);
+  };
+
+  const statusColor = (status) => {
+    if (status === 'confirmed') return C.success;
+    if (status === 'dismissed') return C.danger;
+    return C.warning;
+  };
+
+  const renderEdge = (edge) => {
+    const isEditing = editingId === edge.id;
+    const isLoading = actionLoading === edge.id;
+    const isDismissed = edge.review_status === 'dismissed';
+
+    return (
+      <div key={edge.id} style={{
+        padding: '8px 12px', marginBottom: 4, borderRadius: 4,
+        background: isDismissed ? C.bg : C.card,
+        border: '1px solid ' + C.border,
+        opacity: isDismissed ? 0.5 : (isLoading ? 0.6 : 1),
+        textDecoration: isDismissed ? 'line-through' : 'none',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ flex: 1, fontSize: 13 }}>
+            <span style={{ color: C.accent, fontWeight: 500 }}>{edge.source_name || edge.source_entity_id}</span>
+            {isEditing ? (
+              <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', margin: '0 6px' }}>
+                <span style={{ color: C.textDim }}>{'\u2192'}</span>
+                <input value={editType}
+                  onChange={e => setEditType(e.target.value)}
+                  style={{
+                    padding: '2px 6px', fontSize: 12, borderRadius: 3, width: 140,
+                    background: C.bg, color: C.text, border: '1px solid ' + C.accent,
+                    outline: 'none',
+                  }}
+                  placeholder="relationship type"
+                  autoFocus
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveType(edge.id); if (e.key === 'Escape') setEditingId(null); }}
+                />
+                <span style={{ color: C.textDim }}>{'\u2192'}</span>
+              </span>
+            ) : (
+              <span style={{ color: C.textDim, margin: '0 6px' }}>{'\u2192'} {edge.relationship_type || 'related'} {'\u2192'}</span>
+            )}
+            <span style={{ color: C.purple, fontWeight: 500 }}>{edge.target_name || edge.target_entity_id}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+            <span style={{
+              fontSize: 10, padding: '1px 6px', borderRadius: 3,
+              background: statusColor(edge.review_status) + '22',
+              color: statusColor(edge.review_status),
+              fontWeight: 500,
+            }}>{edge.review_status}</span>
+            {edge.review_status === 'pending' && !isEditing && (
+              <>
+                <button onClick={() => handleConfirm(edge.id)} disabled={isLoading}
+                  style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
+                    background: C.success + '22', color: C.success, border: '1px solid ' + C.success + '44' }}>
+                  {'\u2713'}
+                </button>
+                <button onClick={() => { setEditingId(edge.id); setEditType(edge.relationship_type || ''); }} disabled={isLoading}
+                  style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
+                    background: C.accent + '22', color: C.accent, border: '1px solid ' + C.accent + '44' }}>
+                  Edit
+                </button>
+                <button onClick={() => handleDismiss(edge.id)} disabled={isLoading}
+                  style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
+                    background: C.danger + '22', color: C.danger, border: '1px solid ' + C.danger + '44' }}>
+                  {'\u2717'}
+                </button>
+              </>
+            )}
+            {isEditing && (
+              <>
+                <button onClick={() => handleSaveType(edge.id)} disabled={isLoading || !editType.trim()}
+                  style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
+                    background: C.success + '22', color: C.success, border: '1px solid ' + C.success + '44',
+                    opacity: editType.trim() ? 1 : 0.4 }}>
+                  Save
+                </button>
+                <button onClick={() => setEditingId(null)}
+                  style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
+                    background: C.card, color: C.textDim, border: '1px solid ' + C.border }}>
+                  Cancel
+                </button>
+              </>
+            )}
+            {edge.review_status === 'confirmed' && (
+              <button onClick={() => handleDismiss(edge.id)} disabled={isLoading}
+                style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
+                  background: C.danger + '22', color: C.danger, border: '1px solid ' + C.danger + '44' }}>
+                {'\u2717'}
+              </button>
+            )}
+            {edge.review_status === 'dismissed' && (
+              <button onClick={() => handleConfirm(edge.id)} disabled={isLoading}
+                style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
+                  background: C.success + '22', color: C.success, border: '1px solid ' + C.success + '44' }}>
+                Restore
+              </button>
+            )}
+          </div>
+        </div>
+        {edge.strength != null && edge.review_status !== 'dismissed' && (
+          <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>
+            strength: {(edge.strength * 100).toFixed(0)}%
+            {edge.notes ? ` \u2014 ${edge.notes}` : ''}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  if (edges.length === 0) {
+    return (
+      <div style={{
+        ...cardStyle, marginBottom: 16,
+        borderColor: C.border,
+        background: C.card,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>{'\U0001F517'}</span>
+          <span style={{ color: C.textDim, fontWeight: 500, fontSize: 13 }}>
+            Graph Relationships {'\u2014'} No inferred edges for this conversation
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <div style={{
+        ...cardStyle, marginBottom: 16, cursor: 'pointer',
+        borderColor: pending.length > 0 ? C.warning + '44' : C.success + '44',
+        background: pending.length > 0 ? C.warning + '08' : C.success + '08',
+      }} onClick={() => setExpanded(true)}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>{'\U0001F517'}</span>
+          <span style={{
+            color: pending.length > 0 ? C.warning : C.success,
+            fontWeight: 600, fontSize: 13,
+          }}>
+            {edges.length} graph edge{edges.length !== 1 ? 's' : ''}
+            {pending.length > 0 ? ` (${pending.length} pending review)` : ' \u2014 all reviewed'}
+          </span>
+          <span style={{ color: C.textDim, fontSize: 11, marginLeft: 'auto' }}>click to expand</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      ...cardStyle, marginBottom: 16,
+      borderColor: pending.length > 0 ? C.warning + '44' : C.success + '44',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, cursor: 'pointer' }}
+        onClick={() => setExpanded(false)}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>{'\U0001F517'}</span>
+          <span style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>
+            Graph Relationships ({edges.length})
+          </span>
+          {pending.length > 0 && (
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600,
+              background: C.warning + '22', color: C.warning }}>{pending.length} pending</span>
+          )}
+        </div>
+        <span style={{ color: C.textDim, fontSize: 11 }}>collapse</span>
+      </div>
+      {pending.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pending Review</div>
+          {pending.map(renderEdge)}
+        </div>
+      )}
+      {confirmed.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confirmed</div>
+          {confirmed.map(renderEdge)}
+        </div>
+      )}
+      {dismissed.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Dismissed</div>
+          {dismissed.map(renderEdge)}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function RoutingPreview({ conversationId, refreshKey }) {
   const [preview, setPreview] = useState(null);

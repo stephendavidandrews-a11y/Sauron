@@ -1386,9 +1386,19 @@ export default function Review() {
             </div>
           </>
         ) : (
-          <p style={{ fontSize: 13, color: C.textDim, marginTop: 4 }}>
-            No organizations to review.
-          </p>
+          <div style={{
+            padding: '16px 20px', borderRadius: 6,
+            background: '#111827',
+            border: '1px solid #1f2937',
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
+              No organizations to review
+            </div>
+            <div style={{ fontSize: 11, color: '#4b5563' }}>
+              Organization suggestions from conversations will appear here for review when detected.
+            </div>
+          </div>
         )}
       </div>
 

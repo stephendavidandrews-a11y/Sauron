@@ -39,10 +39,13 @@ class ProvisionalConfirmRequest(BaseModel):
 class CreateContactRequest(BaseModel):
     """Create a new confirmed contact directly."""
     canonical_name: str
+    original_name: Optional[str] = None  # The extracted name being resolved
     organization: Optional[str] = None
+    title: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     aliases: Optional[str] = None  # Semicolon-separated
+    notes: Optional[str] = None
     push_to_networking_app: bool = True
     source_conversation_id: Optional[str] = None
 
@@ -586,7 +589,7 @@ def link_provisional_to_existing(contact_id: str, request: ProvisionalLinkReques
                     target_dict["networking_app_contact_id"],
                     conn,
                 )
-                _replay_pending_object_routes(contact_id, new_id, conn)
+                _replay_pending_object_routes(contact_id, target_dict["networking_app_contact_id"], conn)
             except Exception:
                 logger.exception(f"Failed to release pending routes after merge for {contact_id[:8]}")
 
@@ -770,29 +773,61 @@ def create_contact(request: CreateContactRequest):
     Creates in unified_contacts with is_confirmed=1.
     Optionally pushes to Networking App.
     """
+    from fastapi.responses import JSONResponse
+
     conn = get_connection()
     try:
+        name = request.canonical_name.strip()
+
+        # Fix 6: Duplicate detection
+        existing = conn.execute(
+            "SELECT id, canonical_name FROM unified_contacts WHERE LOWER(canonical_name) = LOWER(?)",
+            (name,)
+        ).fetchone()
+        if existing:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": f"Contact '{existing['canonical_name']}' already exists", "existing_id": existing["id"]}
+            )
+
         contact_id = str(uuid.uuid4())
+        aliases_json = request.aliases or None
+
+        # Fix 1+2: Include organization and title in INSERT
         conn.execute(
             """INSERT INTO unified_contacts
-               (id, canonical_name, email, phone_number, aliases,
+               (id, canonical_name, current_organization, current_title,
+                email, phone_number, aliases,
                 is_confirmed, source_conversation_id, created_at)
-               VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))""",
-            (contact_id, request.canonical_name.strip(),
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))""",
+            (contact_id, name,
+             request.organization or None, request.title or None,
              request.email or None, request.phone or None,
-             request.aliases or None,
+             aliases_json,
              request.source_conversation_id),
         )
 
         networking_app_contact_id = None
 
+        # Fix 3: Push richer data to Networking App
         if request.push_to_networking_app:
             try:
                 import httpx
                 from sauron.config import NETWORKING_APP_URL
+                payload = {"name": name}
+                if request.organization:
+                    payload["organization"] = request.organization
+                if request.title:
+                    payload["title"] = request.title
+                if request.email:
+                    payload["email"] = request.email
+                if request.phone:
+                    payload["phone"] = request.phone
+                if request.notes:
+                    payload["notes"] = request.notes
                 resp = httpx.post(
                     f"{NETWORKING_APP_URL}/api/contacts",
-                    json={"name": request.canonical_name.strip()},
+                    json=payload,
                     timeout=10,
                 )
                 if resp.status_code in (200, 201):
@@ -804,15 +839,59 @@ def create_contact(request: CreateContactRequest):
                             (str(net_id), contact_id),
                         )
                         networking_app_contact_id = str(net_id)
-                        logger.info(f"Pushed new contact '{request.canonical_name}' to Networking App (id={net_id})")
+                        logger.info(f"Pushed new contact '{name}' to Networking App (id={net_id})")
             except Exception as e:
                 logger.warning(f"Failed to push contact to Networking App: {e}")
+
+        # Fix 5: Run entity confirmation cascade to link existing claims
+        try:
+            from sauron.extraction.cascade import cascade_entity_confirmation
+            cascade_names = [name]
+            # Include original extracted name so cascade links claims to the new contact
+            if request.original_name and request.original_name.strip().lower() != name.lower():
+                cascade_names.append(request.original_name.strip())
+            if request.aliases:
+                for a in request.aliases.split(";"):
+                    a = a.strip()
+                    if a:
+                        cascade_names.append(a)
+            cascade_entity_confirmation(
+                conn, contact_id, name, cascade_names,
+                conversation_id=request.source_conversation_id,
+                source="create_contact",
+            )
+        except Exception:
+            logger.exception("create_contact cascade failed (non-fatal)")
+
+        # Absorb matching provisional contact if one exists
+        if request.original_name:
+            provisional = conn.execute(
+                """SELECT id FROM unified_contacts
+                   WHERE LOWER(canonical_name) = LOWER(?) AND is_confirmed = 0 AND id != ?""",
+                (request.original_name.strip(), contact_id)
+            ).fetchone()
+            if provisional:
+                prov_id = provisional["id"]
+                conn.execute(
+                    "UPDATE event_claims SET subject_entity_id = ? WHERE subject_entity_id = ?",
+                    (contact_id, prov_id)
+                )
+                conn.execute(
+                    "UPDATE claim_entities SET entity_id = ? WHERE entity_id = ?",
+                    (contact_id, prov_id)
+                )
+                conn.execute(
+                    "UPDATE synthesis_entity_links SET resolved_entity_id = ? WHERE resolved_entity_id = ?",
+                    (contact_id, prov_id)
+                )
+                conn.execute("DELETE FROM unified_contacts WHERE id = ?", (prov_id,))
+                logger.info(f"Absorbed provisional (id={prov_id[:8]}) into new contact (id={contact_id[:8]})")
 
         conn.commit()
         return {
             "status": "ok",
             "contact_id": contact_id,
-            "canonical_name": request.canonical_name.strip(),
+            "canonical_name": name,
             "networking_app_contact_id": networking_app_contact_id,
         }
     finally:

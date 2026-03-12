@@ -502,3 +502,49 @@ export async function searchNetworkingOrgs(query) {
   return res.json();
 }
 
+
+
+// ── Graph Edge Editing API ──
+export async function fetchGraphEdges(conversationId) {
+  const res = await fetch(`/api/graph-edges/conversation/${conversationId}`);
+  if (!res.ok) return { edges: [], count: 0 };
+  return res.json();
+}
+
+export async function updateGraphEdge(edgeId, updates) {
+  const res = await fetch(`/api/graph-edges/${edgeId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Update edge failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+export async function confirmGraphEdge(edgeId) {
+  const res = await fetch(`/api/graph-edges/${edgeId}/confirm`, { method: 'POST' });
+  if (!res.ok) throw new Error('Confirm edge failed');
+  return res.json();
+}
+
+export async function dismissGraphEdge(edgeId) {
+  const res = await fetch(`/api/graph-edges/${edgeId}/dismiss`, { method: 'POST' });
+  if (!res.ok) throw new Error('Dismiss edge failed');
+  return res.json();
+}
+
+export async function createGraphEdge(data) {
+  const res = await fetch('/api/graph-edges', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Create edge failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}

@@ -12,4 +12,5 @@ def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")  # 30s retry on lock instead of immediate fail
     return conn

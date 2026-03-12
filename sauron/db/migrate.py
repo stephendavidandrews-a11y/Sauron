@@ -394,6 +394,9 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         _run_v21_provisional_org_suggestions(conn)
         _run_v22_current_identity(conn)
 
+        # -- Step 23: v23 Review UI pass --
+        _run_v23_review_ui_pass(conn)
+
         conn.commit()
         logger.info("Migration complete.")
 
@@ -738,4 +741,28 @@ def _run_v22_current_identity(conn):
         if not _column_exists(conn, "unified_contacts", col):
             conn.execute(f"ALTER TABLE unified_contacts ADD COLUMN {col} TEXT")
             print(f"[migrate] v22: added {col} to unified_contacts")
+    conn.commit()
+
+
+def _run_v23_review_ui_pass(conn):
+    """v23: Review UI pass — title on unified_contacts, review columns on graph_edges."""
+    logger.info("Running v23 migration (Review UI pass)...")
+    added = 0
+
+    # unified_contacts.title (generic title, distinct from current_title)
+    if _add_column_safe(conn, "unified_contacts", "title", "TEXT"):
+        added += 1
+
+    # graph_edges review columns
+    if _add_column_safe(conn, "graph_edges", "review_status", "TEXT DEFAULT 'pending'"):
+        added += 1
+    if _add_column_safe(conn, "graph_edges", "reviewed_at", "TEXT"):
+        added += 1
+    if _add_column_safe(conn, "graph_edges", "review_note", "TEXT"):
+        added += 1
+
+    if added:
+        logger.info(f"  Added {added} v23 columns")
+    else:
+        logger.info("  v23 columns already present")
     conn.commit()

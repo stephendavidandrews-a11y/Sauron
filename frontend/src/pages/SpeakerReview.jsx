@@ -16,7 +16,7 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
   const [showAssign, setShowAssign] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: '', organization: '', email: '', phone: '', aliases: '', pushToCRM: true });
+  const [createForm, setCreateForm] = useState({ name: '', organization: '', title: '', email: '', phone: '', aliases: '', notes: '', pushToCRM: true });
   const [creating, setCreating] = useState(false);
 
   const segCount = transcripts.filter(t => t.speaker_label === label).length;
@@ -106,7 +106,7 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
           )}
           <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.border}` }}>
             <button
-              onClick={() => { setShowCreateForm(true); setShowAssign(false); setCreateForm({ name: '', organization: '', email: '', phone: '', aliases: '', pushToCRM: true }); }}
+              onClick={() => { setShowCreateForm(true); setShowAssign(false); setCreateForm({ name: '', organization: '', title: '', email: '', phone: '', aliases: '', notes: '', pushToCRM: true }); }}
               style={{
                 width: '100%', padding: '6px 8px', fontSize: 12,
                 background: C.success + '15', color: C.success,
@@ -164,6 +164,12 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
                   style={inputStyle} placeholder="Company" />
               </div>
               <div>
+                <label style={{ fontSize: 10, color: C.textDim, display: 'block', marginBottom: 2 }}>Title</label>
+                <input value={createForm.title}
+                  onChange={e => setCreateForm(f => ({ ...f, title: e.target.value }))}
+                  style={inputStyle} placeholder="Job title" />
+              </div>
+              <div>
                 <label style={{ fontSize: 10, color: C.textDim, display: 'block', marginBottom: 2 }}>Email</label>
                 <input value={createForm.email}
                   onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))}
@@ -181,6 +187,12 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
               <input value={createForm.aliases}
                 onChange={e => setCreateForm(f => ({ ...f, aliases: e.target.value }))}
                 style={inputStyle} placeholder="Nick; Nickname" />
+            </div>
+            <div style={{ marginBottom: 6 }}>
+              <label style={{ fontSize: 10, color: C.textDim, display: 'block', marginBottom: 2 }}>Notes</label>
+              <input value={createForm.notes}
+                onChange={e => setCreateForm(f => ({ ...f, notes: e.target.value }))}
+                style={inputStyle} placeholder="Optional notes" />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
               <input type="checkbox" checked={createForm.pushToCRM}
@@ -206,7 +218,7 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
                   try {
                     await onCreateAndAssign(label, createForm);
                     setShowCreateForm(false);
-                    setCreateForm({ name: '', organization: '', email: '', phone: '', aliases: '', pushToCRM: true });
+                    setCreateForm({ name: '', organization: '', title: '', email: '', phone: '', aliases: '', notes: '', pushToCRM: true });
                   } catch (e) {
                     alert('Failed to create contact: ' + e.message);
                   }
@@ -319,12 +331,17 @@ export default function SpeakerReview() {
     const result = await api.createContact({
       canonical_name: formData.name.trim(),
       organization: formData.organization || undefined,
+      title: formData.title || undefined,
       email: formData.email || undefined,
       phone: formData.phone || undefined,
       aliases: formData.aliases || undefined,
+      notes: formData.notes || undefined,
       push_to_networking_app: formData.pushToCRM,
       source_conversation_id: id,
     });
+    if (result && result.existing_id) {
+      throw new Error('A contact with that name already exists. Use Assign to link to an existing contact instead.');
+    }
     await api.correctSpeaker(id, label, result.contact_id);
     setSearchQuery('');
     setFilteredContacts([]);
