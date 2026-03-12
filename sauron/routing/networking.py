@@ -220,13 +220,13 @@ def _execute_routing(
         if not contact_id:
             continue
         int_payload = {
+            "contactId": contact_id,
             "interest": mw.get("value", ""),
             "source": "sauron",
-            "sourceId": conversation_id,
         }
         ok, err = _api_call(
             "POST",
-            f"{NETWORKING_APP_URL}/api/contacts/{contact_id}/interests",
+            f"{NETWORKING_APP_URL}/api/personal/interests",
             int_payload,
         )
         if ok:
@@ -244,13 +244,13 @@ def _execute_routing(
         if not contact_id:
             continue
         act_payload = {
+            "contactId": contact_id,
             "activity": mw.get("value", ""),
             "source": "sauron",
-            "sourceId": conversation_id,
         }
         ok, err = _api_call(
             "POST",
-            f"{NETWORKING_APP_URL}/api/contacts/{contact_id}/activities",
+            f"{NETWORKING_APP_URL}/api/personal/activities",
             act_payload,
         )
         if ok:
