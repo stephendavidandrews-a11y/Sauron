@@ -140,6 +140,24 @@ CREATE INDEX IF NOT EXISTS idx_cac_contact ON contact_affiliations_cache(unified
 CREATE INDEX IF NOT EXISTS idx_cac_org ON contact_affiliations_cache(networking_org_id);
 CREATE INDEX IF NOT EXISTS idx_cac_org_name ON contact_affiliations_cache(org_name);
 
+-- Wave 3: provisional org suggestions for review
+CREATE TABLE IF NOT EXISTS provisional_org_suggestions (
+    id TEXT PRIMARY KEY,
+    raw_name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    conversation_id TEXT REFERENCES conversations(id),
+    source_context TEXT,
+    resolution_source_context TEXT,
+    status TEXT DEFAULT 'pending',
+    resolved_org_id TEXT,
+    resolved_metadata TEXT,
+    suggested_by TEXT,
+    created_at DATETIME DEFAULT (datetime('now')),
+    resolved_at DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_prov_org_status ON provisional_org_suggestions(status);
+CREATE INDEX IF NOT EXISTS idx_prov_org_normalized ON provisional_org_suggestions(normalized_name);
+
 CREATE TABLE IF NOT EXISTS voice_profiles (
     id TEXT PRIMARY KEY,
     contact_id TEXT,

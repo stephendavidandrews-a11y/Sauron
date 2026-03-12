@@ -209,8 +209,8 @@ def _sync_affiliations(conn) -> dict:
                 INSERT INTO contact_affiliations_cache
                 (id, unified_contact_id, networking_affiliation_id, networking_org_id,
                  org_name, org_industry, title, department, role_type, is_current,
-                 start_date, end_date, resolution_source, synced_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 start_date, end_date, resolution_source, is_primary, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(networking_affiliation_id) DO UPDATE SET
                     org_name = excluded.org_name,
                     org_industry = excluded.org_industry,
@@ -221,6 +221,7 @@ def _sync_affiliations(conn) -> dict:
                     start_date = excluded.start_date,
                     end_date = excluded.end_date,
                     resolution_source = excluded.resolution_source,
+                        is_primary = excluded.is_primary,
                     synced_at = datetime('now')
             """, (
                 str(uuid.uuid4()), uc_id, aff_id, org_id,
@@ -229,6 +230,7 @@ def _sync_affiliations(conn) -> dict:
                 aff.get("isCurrent", True),
                 aff.get("startDate"), aff.get("endDate"),
                 aff.get("resolutionSource"),
+                        aff.get("isPrimary", False),
             ))
             stats["synced"] += 1
 

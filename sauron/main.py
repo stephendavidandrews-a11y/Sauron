@@ -194,6 +194,7 @@ from sauron.api.beliefs_api import router as beliefs_router
 from sauron.api.learning_api import router as learning_router
 from sauron.api.routing_api import router as routing_router
 from sauron.api.routing_api import conv_routing_router
+from sauron.api.provisional_orgs_api import router as provisional_orgs_router
 
 app.include_router(conversations_router, prefix="/api")
 app.include_router(profiles_router, prefix="/api")
@@ -209,6 +210,7 @@ app.include_router(beliefs_router, prefix="/api")
 app.include_router(learning_router, prefix="/api")
 app.include_router(routing_router, prefix="/api")
 app.include_router(conv_routing_router, prefix="/api")
+app.include_router(provisional_orgs_router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -390,6 +390,8 @@ def run_migration(db_path: Path = DB_PATH) -> None:
 
         # Wave 2: affiliation cache
         _run_v19_affiliation_cache(conn)
+        _run_v20_affiliation_cache_is_primary(conn)
+        _run_v21_provisional_org_suggestions(conn)
 
         conn.commit()
         logger.info("Migration complete.")
@@ -667,3 +669,59 @@ if __name__ == "__main__":
     print(f"Running v5 migration on {DB_PATH} ...")
     run_migration()
     print("Done.")
+
+
+def _run_v20_affiliation_cache_is_primary(conn):
+    """Wave 3 Step 10E: Add is_primary to contact_affiliations_cache.
+    isPrimary is a policy field mirrored from Networking App."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(contact_affiliations_cache)").fetchall()}
+    if "is_primary" not in cols:
+        conn.execute("ALTER TABLE contact_affiliations_cache ADD COLUMN is_primary BOOLEAN DEFAULT 0")
+        conn.commit()
+        print("[migrate] v20: added is_primary to contact_affiliations_cache")
+    else:
+        print("[migrate] v20: is_primary already exists, skipping")
+
+def _run_v21_provisional_org_suggestions(conn):
+    """Wave 3 Step 11A: Add provisional_org_suggestions table.
+    Stores org names that failed quality gate (resolutionSource=provisional_suggestion)
+    for human review in Sauron's Review page.
+    """
+    # Check if table already exists
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    if "provisional_org_suggestions" not in tables:
+        conn.execute("""
+            CREATE TABLE provisional_org_suggestions (
+                id TEXT PRIMARY KEY,
+                raw_name TEXT NOT NULL,
+                normalized_name TEXT NOT NULL,
+                conversation_id TEXT REFERENCES conversations(id),
+                source_context TEXT,
+                resolution_source_context TEXT,
+                status TEXT DEFAULT 'pending',
+                resolved_org_id TEXT,
+                resolved_metadata TEXT,
+                suggested_by TEXT,
+                created_at DATETIME DEFAULT (datetime('now')),
+                resolved_at DATETIME
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_prov_org_status ON provisional_org_suggestions(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_prov_org_normalized ON provisional_org_suggestions(normalized_name)")
+        conn.commit()
+        print("[migrate] v21: created provisional_org_suggestions table")
+    else:
+        # Check for missing columns (resolved_metadata, resolution_source_context)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(provisional_org_suggestions)").fetchall()}
+        if "resolved_metadata" not in cols:
+            conn.execute("ALTER TABLE provisional_org_suggestions ADD COLUMN resolved_metadata TEXT")
+            conn.commit()
+            print("[migrate] v21: added resolved_metadata column")
+        if "resolution_source_context" not in cols:
+            conn.execute("ALTER TABLE provisional_org_suggestions ADD COLUMN resolution_source_context TEXT")
+            conn.commit()
+            print("[migrate] v21: added resolution_source_context column")
+        print("[migrate] v21: provisional_org_suggestions already exists, skipping")
+

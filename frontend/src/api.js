@@ -448,3 +448,57 @@ export async function fetchPendingRoutes(by = "entity") {
   if (!res.ok) return [];
   return res.json();
 }
+
+
+// ── Provisional Organization Review ──
+export async function fetchProvisionalOrgs(status = 'pending') {
+  const res = await fetch(`/api/provisional-orgs?status=${status}`);
+  if (!res.ok) throw new Error(`Failed to fetch provisional orgs: ${res.status}`);
+  return res.json();
+}
+
+export async function approveProvisionalOrg(suggestionId, parentOrganizationId = null) {
+  const body = parentOrganizationId ? { parentOrganizationId } : {};
+  const res = await fetch(`/api/provisional-orgs/${suggestionId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Approve failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+export async function mergeProvisionalOrg(suggestionId, targetOrgId) {
+  const res = await fetch(`/api/provisional-orgs/${suggestionId}/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetOrgId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Merge failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+export async function dismissProvisionalOrg(suggestionId) {
+  const res = await fetch(`/api/provisional-orgs/${suggestionId}/dismiss`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Dismiss failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+export async function searchNetworkingOrgs(query) {
+  const res = await fetch(`/api/provisional-orgs/search-orgs?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`Search failed: ${res.status}`);
+  return res.json();
+}
+

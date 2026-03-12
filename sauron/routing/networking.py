@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime
 
 import httpx
+from sauron.routing.provisional import store_provisional_org
 
 from sauron.config import NETWORKING_APP_URL
 from sauron.routing.contact_bridge import resolve_networking_contact_id
@@ -205,7 +206,7 @@ def _execute_routing(
     if networking_app_contact_id:
         interaction_payload["contactId"] = networking_app_contact_id
 
-    ok, err = _api_call("POST", f"{NETWORKING_APP_URL}/api/interactions", interaction_payload)
+    ok, err, _resp = _api_call("POST", f"{NETWORKING_APP_URL}/api/interactions", interaction_payload)
     if ok:
         successes.append(("interaction", interaction_payload))
         core_lane_results.append({"name": "interaction", "status": "success"})
@@ -229,7 +230,7 @@ def _execute_routing(
 
     # 2. Scheduling leads (social-firmness commitments + dedicated list)
     for lead_payload in _collect_scheduling_leads(conversation_id, synthesis, networking_app_contact_id, sel_conn):
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/scheduling-leads", lead_payload
         )
         if ok:
@@ -262,7 +263,7 @@ def _execute_routing(
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/standing-offers", offer_payload
         )
         if ok:
@@ -310,7 +311,7 @@ def _execute_routing(
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST",
             f"{NETWORKING_APP_URL}/api/contacts/{contact_id}/life-events",
             le_payload,
@@ -337,7 +338,7 @@ def _execute_routing(
             "sourceId": conversation_id,
             "sourceClaimId": mw.get("claim_id"),
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST",
             f"{NETWORKING_APP_URL}/api/personal/interests",
             int_payload,
@@ -364,7 +365,7 @@ def _execute_routing(
             "sourceId": conversation_id,
             "sourceClaimId": mw.get("claim_id"),
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST",
             f"{NETWORKING_APP_URL}/api/personal/activities",
             act_payload,
@@ -446,7 +447,7 @@ def _execute_routing(
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/contact-relationships", edge_payload
         )
         if ok:
@@ -481,7 +482,7 @@ def _execute_routing(
             "sourceId": conversation_id,
             "sourceClaimId": pp.get("claim_id"),
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/signals", sig_payload
         )
         if ok:
@@ -513,7 +514,7 @@ def _execute_routing(
             "sourceId": conversation_id,
             "sourceClaimId": res.get("claim_id"),
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/referenced-resources", res_payload
         )
         if ok:
@@ -584,7 +585,7 @@ def _execute_routing(
             "sourceId": conversation_id,
             "sourceClaimId": sc.get("source_claim_id"),
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/signals", sc_payload
         )
         if ok:
@@ -626,12 +627,31 @@ def _execute_routing(
             "sourceId": conversation_id,
             "sourceClaimId": oi.get("source_claim_id"),
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/organization-signals", oi_payload
         )
         if ok:
             successes.append(("org_intel_signal", oi_payload))
         else:
+            # Capture provisional org suggestion on 422 (org not resolved)
+            if _resp and _resp.get("resolutionSource") == "provisional_suggestion":
+                store_provisional_org(
+                    raw_name=org_name,
+                    normalized_name=org_name.lower().strip(),
+                    conversation_id=conversation_id,
+                    source_context=f"org_intelligence: {oi.get('intel_type', '')} - {oi.get('details', '')[:200]}",
+                    resolution_source_context="provisional_suggestion",
+                    suggested_by="org_intelligence",
+                )
+            elif err and "422" in err and "not resolved" in err.lower():
+                store_provisional_org(
+                    raw_name=org_name,
+                    normalized_name=org_name.lower().strip(),
+                    conversation_id=conversation_id,
+                    source_context=f"org_intelligence: {oi.get('intel_type', '')} - {oi.get('details', '')[:200]}",
+                    resolution_source_context=err[:200],
+                    suggested_by="org_intelligence",
+                )
             secondary_errors.append(("org_intel_signal", oi_payload, err))
 
     # 12. New contacts — REMOVED (Category 2, Step C)
@@ -916,7 +936,7 @@ def _route_standalone_commitments(
                 "sourceClaimId": c.get("source_claim_id"),
             }
 
-            ok, err = _api_call(
+            ok, err, _resp = _api_call(
                 "POST", f"{NETWORKING_APP_URL}/api/commitments", payload
             )
             if ok:
@@ -991,8 +1011,12 @@ def _collect_scheduling_leads(
 
 def _api_call(
     method: str, url: str, payload: dict
-) -> tuple[bool, str | None]:
-    """Execute a single API call. Returns (success, error_or_None)."""
+) -> tuple[bool, str | None, dict | None]:
+    """Execute a single API call. Returns (success, error_or_None, response_body_or_None).
+
+    Third element is the parsed JSON response body (dict) when available,
+    used to inspect resolution details on error (e.g. provisional_suggestion).
+    """
     try:
         if method == "POST":
             resp = httpx.post(url, json=payload, timeout=TIMEOUT)
@@ -1001,16 +1025,22 @@ def _api_call(
         elif method == "GET":
             resp = httpx.get(url, timeout=TIMEOUT)
         else:
-            return False, f"Unsupported method: {method}"
+            return False, f"Unsupported method: {method}", None
+
+        resp_body = None
+        try:
+            resp_body = resp.json()
+        except Exception:
+            pass
 
         if resp.status_code < 300:
-            return True, None
+            return True, None, resp_body
         else:
-            return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
+            return False, f"HTTP {resp.status_code}: {resp.text[:200]}", resp_body
     except httpx.ConnectError:
-        return False, "ConnectError: Networking app not reachable"
+        return False, "ConnectError: Networking app not reachable", None
     except Exception as e:
-        return False, str(e)[:300]
+        return False, str(e)[:300], None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1077,7 +1107,7 @@ def _route_provenance(
             "sourceClaimId": prov.get("source_claim_id"),
         }
 
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/contact-provenance", payload
         )
         if ok:
@@ -1156,7 +1186,7 @@ def _route_profile_intelligence(
                 "sourceSystem": "sauron",
                 "sourceId": conversation_id,
             }
-            ok, err = _api_call(
+            ok, err, _resp = _api_call(
                 "POST", f"{NETWORKING_APP_URL}/api/contact-profile-signals", payload
             )
             if ok:
@@ -1195,7 +1225,7 @@ def _route_profile_intelligence(
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/contact-profile-signals", payload
         )
         if ok:
@@ -1214,7 +1244,7 @@ def _route_profile_intelligence(
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
         }
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/contact-profile-signals", payload
         )
         if ok:
@@ -1286,12 +1316,31 @@ def _route_affiliations(
             "sourceClaimId": aff.get("source_claim_id"),
         }
 
-        ok, err = _api_call(
+        ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/contact-affiliations", payload
         )
         if ok:
             successes.append(("affiliation", payload))
         else:
+            # Capture provisional org suggestion on 422 (org not resolved)
+            if _resp and _resp.get("resolutionSource") == "provisional_suggestion":
+                store_provisional_org(
+                    raw_name=org_name,
+                    normalized_name=org_name.lower().strip(),
+                    conversation_id=conversation_id,
+                    source_context=f"affiliation: {contact_name} at {org_name} ({aff.get('title', '')})",
+                    resolution_source_context="provisional_suggestion",
+                    suggested_by="affiliation",
+                )
+            elif err and "422" in err and "not resolved" in err.lower():
+                store_provisional_org(
+                    raw_name=org_name,
+                    normalized_name=org_name.lower().strip(),
+                    conversation_id=conversation_id,
+                    source_context=f"affiliation: {contact_name} at {org_name} ({aff.get('title', '')})",
+                    resolution_source_context=err[:200],
+                    suggested_by="affiliation",
+                )
             sec_errors.append(("affiliation", payload, err))
 
     return successes, sec_errors
@@ -1524,7 +1573,7 @@ def _update_contact_field_null_only(
     }
     update_body[net_field] = value
 
-    ok, err = _api_call(
+    ok, err, _resp = _api_call(
         "PUT",
         f"{NETWORKING_APP_URL}/api/contacts/{contact_id}",
         update_body,

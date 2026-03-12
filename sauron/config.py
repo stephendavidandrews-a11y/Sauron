@@ -27,7 +27,7 @@ SAURON_PORT = 8003
 AUDIO_ANALYZER_PORT = 5050
 
 # ── Downstream Services ──
-NETWORKING_APP_URL = "http://localhost:3001"
+NETWORKING_APP_URL = "http://localhost:3000"
 CFTC_APP_URL = "http://localhost:8000"
 
 # ── Whisper ──
