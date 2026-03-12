@@ -23,19 +23,24 @@ def list_pending_routes(by: str = Query("entity", pattern="^(entity|conversation
     try:
         if by == "entity":
             rows = conn.execute(
-                """SELECT blocked_on_entity, COUNT(*) as count,
-                          GROUP_CONCAT(DISTINCT route_type) as route_types,
-                          MIN(created_at) as oldest
-                   FROM pending_object_routes
-                   WHERE status = 'pending'
-                   GROUP BY blocked_on_entity
+                """SELECT por.blocked_on_entity, COUNT(*) as count,
+                          GROUP_CONCAT(DISTINCT por.route_type) as route_types,
+                          GROUP_CONCAT(DISTINCT por.conversation_id) as conversation_ids,
+                          MIN(por.created_at) as oldest,
+                          uc.canonical_name as entity_name
+                   FROM pending_object_routes por
+                   LEFT JOIN unified_contacts uc ON por.blocked_on_entity = uc.id
+                   WHERE por.status = 'pending'
+                   GROUP BY por.blocked_on_entity
                    ORDER BY count DESC"""
             ).fetchall()
             return [
                 {
                     "blocked_on_entity": r["blocked_on_entity"],
+                    "entity_name": r["entity_name"] or r["blocked_on_entity"],
                     "count": r["count"],
                     "route_types": r["route_types"].split(",") if r["route_types"] else [],
+                    "conversation_ids": r["conversation_ids"].split(",") if r["conversation_ids"] else [],
                     "oldest": r["oldest"],
                 }
                 for r in rows

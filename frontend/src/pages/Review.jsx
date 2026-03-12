@@ -1204,6 +1204,11 @@ export default function Review() {
               {pendingRouteCount} pending route{pendingRouteCount !== 1 ? 's' : ''}
             </span>
           )}
+          {provOrgs.total > 0 && (
+            <span style={{ background: '#f59e0b', color: '#0a0f1a', borderRadius: 12, padding: '2px 10px', fontSize: 12, display: 'inline-block', marginLeft: 8, verticalAlign: 'middle', fontWeight: 600 }}>
+              {provOrgs.total} org suggestion{provOrgs.total !== 1 ? 's' : ''}
+            </span>
+          )}
         {/* Quick Pass toggle + Queue count summary */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {claimReview.length > 0 && (
@@ -1343,9 +1348,9 @@ export default function Review() {
                 padding: '8px 12px', fontSize: 13 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <StatusDot color={C.purple} />
-                  <span style={{ color: C.text }}>{pe.blocked_on_entity}</span>
+                  <span style={{ color: C.text }}>{pe.entity_name || pe.blocked_on_entity}</span>
                   <span style={{ color: C.textDim, fontSize: 11 }}>
-                    {pe.count} claim{pe.count !== 1 ? 's' : ''} across {pe.conversation_ids?.length || 0} conversation{(pe.conversation_ids?.length || 0) !== 1 ? 's' : ''}
+                    {pe.count} claim{pe.count !== 1 ? 's' : ''}{pe.conversation_ids && pe.conversation_ids.length > 0 ? ` across ${pe.conversation_ids.length} conversation${pe.conversation_ids.length !== 1 ? 's' : ''}` : ''}
                   </span>
                 </div>
               </div>
@@ -1359,27 +1364,33 @@ export default function Review() {
         </div>
       )}
 
-      {/* 3.7. Organization Review (amber) */}
-      {provOrgs.total > 0 && (
-        <div style={sectionStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={sectionTitle}>Organization Review</h3>
-            <QueueBadge count={provOrgs.total} color={C.warning} />
-          </div>
-          <p style={{ fontSize: 13, color: C.textDim, marginBottom: 16, marginTop: 4 }}>
-            Unresolved organization names from conversations. Create, link to existing, or dismiss.
-          </p>
-          <div>
-            {provOrgs.groups.map(group => (
-              <ProvisionalOrgCard
-                key={group.normalized_name}
-                group={group}
-                onAction={loadProvOrgs}
-              />
-            ))}
-          </div>
+      {/* 3.7. Organization Review (amber) — always visible */}
+      <div style={sectionStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <h3 style={sectionTitle}>Organization Review</h3>
+          {provOrgs.total > 0 && <QueueBadge count={provOrgs.total} color={C.warning} />}
         </div>
-      )}
+        {provOrgs.total > 0 ? (
+          <>
+            <p style={{ fontSize: 13, color: C.textDim, marginBottom: 16, marginTop: 4 }}>
+              Unresolved organization names from conversations. Create, link to existing, or dismiss.
+            </p>
+            <div>
+              {provOrgs.groups.map(group => (
+                <ProvisionalOrgCard
+                  key={group.normalized_name}
+                  group={group}
+                  onAction={loadProvOrgs}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <p style={{ fontSize: 13, color: C.textDim, marginTop: 4 }}>
+            No organizations to review.
+          </p>
+        )}
+      </div>
 
       {/* 4. Processing (dim) */}
       {processing.length > 0 && (

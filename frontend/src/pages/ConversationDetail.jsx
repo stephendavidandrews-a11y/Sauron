@@ -2826,6 +2826,11 @@ export function PeopleReviewBanner({
                         padding: '3px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
                         background: C.accent + '22', color: C.accent, border: '1px solid ' + C.accent + '44',
                       }}>Link to Existing</button>
+                    <button onClick={() => startEdit(person)}
+                      style={{
+                        padding: '3px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                        background: C.success + '22', color: C.success, border: '1px solid ' + C.success + '44',
+                      }}>Create Contact</button>
                     <button onClick={() => handleSkip(person)} disabled={isLoading}
                       style={{
                         padding: '3px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
