@@ -31,10 +31,39 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RoutingSummary:
+    """Per-routing-run health snapshot stored in routing_summaries table.
+
+    Lane statuses:
+        success             — lane executed, all API calls succeeded
+        failed              — lane executed, one or more API calls failed
+        skipped_no_data     — lane had nothing to route (healthy, NOT degraded)
+        skipped_blocked     — lane had data but entity unresolved/held (degraded)
+        skipped_unresolved  — lane had data but entity resolution failed (degraded)
+        skipped_low_confidence — lane had data but below confidence threshold (degraded)
+
+    Counting rules:
+        warning_count  = count of degraded-but-not-failed secondary lanes
+                         (skipped_blocked, skipped_unresolved, skipped_low_confidence)
+                         Does NOT include skipped_no_data or failed.
+        error_count    = count of failed secondary lanes + count of failed core lanes
+
+    final_state semantics:
+        success        — all core lanes succeeded, no degraded secondary lanes.
+                         Lanes with skipped_no_data do NOT prevent success.
+        success_with_partial_secondary_loss
+                       — all core lanes succeeded, but one or more secondary lanes
+                         are in a DEGRADED_STATUSES state (failed, skipped_blocked,
+                         skipped_unresolved, or skipped_low_confidence).
+                         NOTE: this means warning_count can be 0 while final_state
+                         is success_with_partial_secondary_loss — that happens when
+                         secondary lanes failed (counted in error_count) but none
+                         were in the warning-only degraded states.
+        failed         — one or more core lanes failed. Entire routing is a failure.
+    """
     conversation_id: str
     routing_attempt_id: str  # UUID
     trigger_type: str  # initial, reroute, replay, solo
-    final_state: str  # success, partial_secondary_loss, failed
+    final_state: str  # success, success_with_partial_secondary_loss, failed
     core_lanes: list = field(default_factory=list)  # [{name, status, error?}]
     secondary_lanes: list = field(default_factory=list)  # [{name, status, reason?}]
     pending_entities: list = field(default_factory=list)  # blocked entity names
@@ -194,6 +223,8 @@ def _execute_routing(
             secondary_lane_results.append({"name": "commitment", "status": "failed", "reason": e})
     elif commit_ok:
         secondary_lane_results.append({"name": "commitment", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "commitment", "status": "skipped_no_data"})
 
     # 2. Scheduling leads (social-firmness commitments + dedicated list)
     for lead_payload in _collect_scheduling_leads(conversation_id, synthesis, networking_app_contact_id, sel_conn):
@@ -497,7 +528,7 @@ def _execute_routing(
     elif any(c == "interest" for c, _ in successes):
         secondary_lane_results.append({"name": "interests", "status": "success"})
     else:
-        secondary_lane_results.append({"name": "interests", "status": "skipped", "reason": "no data"})
+        secondary_lane_results.append({"name": "interests", "status": "skipped_no_data"})
 
     # Summarize activities lane
     act_errs = [e for c, _, e in secondary_errors if c == "activity"]
@@ -506,7 +537,7 @@ def _execute_routing(
     elif any(c == "activity" for c, _ in successes):
         secondary_lane_results.append({"name": "activities", "status": "success"})
     else:
-        secondary_lane_results.append({"name": "activities", "status": "skipped", "reason": "no data"})
+        secondary_lane_results.append({"name": "activities", "status": "skipped_no_data"})
 
     # Summarize referenced_resources lane
     res_errs = [e for c, _, e in secondary_errors if c == "referenced_resource"]
@@ -515,7 +546,7 @@ def _execute_routing(
     elif any(c == "referenced_resource" for c, _ in successes):
         secondary_lane_results.append({"name": "referenced_resources", "status": "success"})
     else:
-        secondary_lane_results.append({"name": "referenced_resources", "status": "skipped", "reason": "no data"})
+        secondary_lane_results.append({"name": "referenced_resources", "status": "skipped_no_data"})
 
     # 10b. Status changes (secondary — non-fatal)
     _sc_list = synthesis.get("status_changes", [])
@@ -612,7 +643,7 @@ def _execute_routing(
     elif any(c == "status_change_signal" for c, _ in successes):
         secondary_lane_results.append({"name": "status_changes", "status": "success"})
     else:
-        secondary_lane_results.append({"name": "status_changes", "status": "skipped", "reason": "no data"})
+        secondary_lane_results.append({"name": "status_changes", "status": "skipped_no_data"})
 
     # Summarize org_intelligence lane
     oi_errs = [e for c, _, e in secondary_errors if c == "org_intel_signal"]
@@ -621,7 +652,7 @@ def _execute_routing(
     elif any(c == "org_intel_signal" for c, _ in successes):
         secondary_lane_results.append({"name": "org_intelligence", "status": "success"})
     else:
-        secondary_lane_results.append({"name": "org_intelligence", "status": "skipped", "reason": "no data"})
+        secondary_lane_results.append({"name": "org_intelligence", "status": "skipped_no_data"})
 
     # Summarize provenance lane
     prov_errs_list = [e for c, _, e in secondary_errors if c == "provenance"]
@@ -630,7 +661,7 @@ def _execute_routing(
     elif any(c == "provenance" for c, _ in successes):
         secondary_lane_results.append({"name": "provenance", "status": "success"})
     else:
-        secondary_lane_results.append({"name": "provenance", "status": "skipped", "reason": "no data"})
+        secondary_lane_results.append({"name": "provenance", "status": "skipped_no_data"})
 
     # Summarize profile_intelligence lane
     prof_errs_list = [e for c, _, e in secondary_errors if c == "profile_intelligence"]
@@ -639,7 +670,7 @@ def _execute_routing(
     elif any(c == "profile_intelligence" for c, _ in successes):
         secondary_lane_results.append({"name": "profile_intelligence", "status": "success"})
     else:
-        secondary_lane_results.append({"name": "profile_intelligence", "status": "skipped", "reason": "no data"})
+        secondary_lane_results.append({"name": "profile_intelligence", "status": "skipped_no_data"})
 
     # Collect pending entities
     pending_entities = []
@@ -683,7 +714,7 @@ def _execute_routing(
             core_lanes=core_lane_results,
             secondary_lanes=secondary_lane_results,
             pending_entities=pending_entities,
-            warning_count=len([s for s in secondary_lane_results if s.get("status") == "skipped"]),
+            warning_count=len([s for s in secondary_lane_results if s.get("status") in {"skipped_blocked", "skipped_unresolved", "skipped_low_confidence"}]),
             error_count=len([s for s in secondary_lane_results if s.get("status") == "failed"]) + len(errors),
         )
         _store_routing_summary(summary, sel_conn)
@@ -698,8 +729,11 @@ def _execute_routing(
     )
 
     # Determine final state
-    has_secondary_failures = any(s.get("status") == "failed" for s in secondary_lane_results)
-    final_state = "partial_secondary_loss" if has_secondary_failures else "success"
+    # Degraded statuses: failed, skipped_blocked, skipped_unresolved, skipped_low_confidence
+    # NOT degraded: skipped_no_data (nothing to do = healthy)
+    DEGRADED_STATUSES = {"failed", "skipped_blocked", "skipped_unresolved", "skipped_low_confidence"}
+    has_degraded_secondary = any(s.get("status") in DEGRADED_STATUSES for s in secondary_lane_results)
+    final_state = "success_with_partial_secondary_loss" if has_degraded_secondary else "success"
 
     summary = RoutingSummary(
         conversation_id=conversation_id,
@@ -709,7 +743,7 @@ def _execute_routing(
         core_lanes=core_lane_results,
         secondary_lanes=secondary_lane_results,
         pending_entities=pending_entities,
-        warning_count=len([s for s in secondary_lane_results if s.get("status") == "skipped"]),
+        warning_count=len([s for s in secondary_lane_results if s.get("status") in DEGRADED_STATUSES and s.get("status") != "failed"]),
         error_count=len([s for s in secondary_lane_results if s.get("status") == "failed"]),
     )
     _store_routing_summary(summary, sel_conn)

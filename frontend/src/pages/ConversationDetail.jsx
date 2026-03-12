@@ -35,7 +35,7 @@ function RoutingChip({ summary, expanded, onToggle }) {
   const rs = summary;
   const chipMap = {
     success: { bg: '#10b98122', color: '#10b981', border: '#10b98144', label: '✓ Routed' },
-    partial_secondary_loss: { bg: '#f59e0b22', color: '#f59e0b', border: '#f59e0b44', label: '⚠ Partial' },
+    success_with_partial_secondary_loss: { bg: '#f59e0b22', color: '#f59e0b', border: '#f59e0b44', label: '⚠ Partial' },
     failed: { bg: '#ef444422', color: '#ef4444', border: '#ef444444', label: '✗ Failed' },
   };
   const chip = rs ? (chipMap[rs.final_state] || chipMap.failed) : null;
