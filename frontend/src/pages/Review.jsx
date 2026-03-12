@@ -877,10 +877,10 @@ export default function Review() {
   const [pendingEntityCount, setPendingEntityCount] = useState(0);
   const [pendingEntities, setPendingEntities] = useState([]);
   useEffect(() => {
-    fetchPendingRoutes(conversation).then(items => {
+    fetchPendingRoutes("conversation").then(items => {
       setPendingRouteCount(items.length);
     });
-    fetchPendingRoutes(entity).then(items => {
+    fetchPendingRoutes("entity").then(items => {
       setPendingEntityCount(items.length);
       setPendingEntities(items);
     });
