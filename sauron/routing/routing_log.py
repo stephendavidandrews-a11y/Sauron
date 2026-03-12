@@ -206,6 +206,19 @@ def release_pending_routes(entity_id: str, networking_app_contact_id: str, conn=
                     (conversation_id,),
                 )
 
+                # Mark any pending_object_routes for this conversation+entity as
+                # released, since the full reroute already handled those edges.
+                # This prevents _replay_pending_object_routes() from double-sending
+                # the same edges in the same confirm/link flow.
+                conn.execute(
+                    """UPDATE pending_object_routes
+                       SET status = 'released', released_at = datetime('now')
+                       WHERE conversation_id = ?
+                         AND blocked_on_entity = ?
+                         AND status = 'pending'""",
+                    (conversation_id, entity_id),
+                )
+
                 logger.info(f"Released pending route for conversation {conversation_id[:8]}")
 
             except Exception as e:

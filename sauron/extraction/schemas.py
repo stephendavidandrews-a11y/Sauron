@@ -112,11 +112,24 @@ class MemoryWrite(BaseModel):
     source_quote: str = ""
 
 
+class NewContactMention(BaseModel):
+    """A structured mention of a previously unknown person."""
+    name: str
+    organization: str | None = None
+    title: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    context: str | None = None
+    connectionTo: str | None = None
+    mentionedBy: str | None = None
+    confidence: float | None = None
+
+
 class ClaimsResult(BaseModel):
     """Sonnet 4.6 output — atomic claims with evidence spans."""
     claims: list[Claim] = Field(default_factory=list)
     memory_writes: list[MemoryWrite] = Field(default_factory=list)
-    new_contacts_mentioned: list[str] = Field(default_factory=list)
+    new_contacts_mentioned: list[NewContactMention | str] = Field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -214,6 +227,33 @@ class FollowUp(BaseModel):
     due_date: str | None = None
 
 
+class StatusChange(BaseModel):
+    """A job change, promotion, departure, relocation, or similar status update."""
+    contact_name: str
+    change_type: str  # "job_change", "promotion", "departure", "relocation", "title_change"
+    details: str
+    effective_date: str | None = None
+    source_claim_id: str | None = None
+
+
+class OrgIntelligence(BaseModel):
+    """Organization-level intelligence: restructuring, hiring, funding, policy changes."""
+    organization: str
+    intel_type: str  # "restructuring", "hiring", "funding", "policy_change", "acquisition", "expansion"
+    details: str
+    mentioned_by: str | None = None  # contact who mentioned it
+    source_claim_id: str | None = None
+
+
+class ProvenanceObservation(BaseModel):
+    """How a person entered the network or how the user came to know them."""
+    contact_name: str
+    introduced_by: str | None = None       # name of the person who made the intro
+    discovered_via: str | None = None      # "conference", "referral", "cold_outreach", "mutual_friend"
+    context: str = ""                      # brief description of how they met/connected
+    source_claim_id: str | None = None
+
+
 class SynthesisResult(BaseModel):
     """Opus 4.6 output — synthesis from claims + vocal analysis."""
 
@@ -246,6 +286,9 @@ class SynthesisResult(BaseModel):
     follow_ups: list[FollowUp] = Field(default_factory=list)
     policy_positions: list[PolicyPosition] = Field(default_factory=list)
     topics_discussed: list[str] = Field(default_factory=list)
+    provenance_observations: list[ProvenanceObservation] = Field(default_factory=list)
+    status_changes: list[StatusChange] = Field(default_factory=list)
+    org_intelligence: list[OrgIntelligence] = Field(default_factory=list)
 
     # What changed per person
     what_changed: dict[str, str] = Field(

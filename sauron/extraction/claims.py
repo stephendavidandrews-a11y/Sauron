@@ -200,7 +200,16 @@ Output ONLY valid JSON — no preamble, no commentary, no markdown fences:
       "source_quote": "Exact words"
     }
   ],
-  "new_contacts_mentioned": ["Name1", "Name2"]
+  "new_contacts_mentioned": [
+    {
+      "name": "Full Name",
+      "organization": null,
+      "title": null,
+      "context": "Brief context of how they were mentioned",
+      "connectionTo": "Name of person who knows them (if mentioned)",
+      "mentionedBy": "Speaker who mentioned them"
+    }
+  ]
 }
 
 ═══════════════════════════════════════════════════════════════
@@ -689,7 +698,7 @@ async def _extract_claims_async(
     # Merge results in batch order
     all_claims = []
     all_memory_writes = []
-    all_new_contacts = set()
+    all_new_contacts_map = {}
     claim_counter = 0
 
     for batch_idx, result, usage in sorted(results, key=lambda r: r[0]):
@@ -705,13 +714,21 @@ async def _extract_claims_async(
             all_claims.append(claim)
 
         all_memory_writes.extend(result.memory_writes)
-        all_new_contacts.update(result.new_contacts_mentioned)
+        for mention in result.new_contacts_mentioned:
+            if isinstance(mention, str):
+                name = mention.strip()
+                if name and name not in all_new_contacts_map:
+                    all_new_contacts_map[name] = mention
+            else:
+                name = (getattr(mention, 'name', '') or '').strip()
+                if name:
+                    all_new_contacts_map[name] = mention  # structured overrides string
 
     # Merge into single result
     merged = ClaimsResult(
         claims=all_claims,
         memory_writes=all_memory_writes,
-        new_contacts_mentioned=sorted(all_new_contacts),
+        new_contacts_mentioned=list(all_new_contacts_map.values()),
     )
 
     # Instrumentation

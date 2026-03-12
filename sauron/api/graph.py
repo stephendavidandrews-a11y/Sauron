@@ -49,6 +49,78 @@ class CreateContactRequest(BaseModel):
 
 # ── Existing endpoints ──────────────────────────────────────────
 
+def _replay_pending_object_routes(entity_id: str, networking_app_contact_id: str, conn):
+    """Replay pending object routes for a confirmed entity.
+
+    Unlike release_pending_routes (which replays full conversation routing from routing_log),
+    this replays individual object-level holds from pending_object_routes.
+    """
+    import json as _json
+    from sauron.routing.networking import _api_call, NETWORKING_APP_URL
+
+    pending = conn.execute(
+        """SELECT id, conversation_id, route_type, payload
+           FROM pending_object_routes
+           WHERE blocked_on_entity = ? AND status = 'pending'""",
+        (entity_id,),
+    ).fetchall()
+
+    if not pending:
+        return 0
+
+    released = 0
+    for route in pending:
+        payload = _json.loads(route["payload"])
+
+        if route["route_type"] == "graph_edge":
+            # Fill in the resolved contact ID for the blocked endpoint
+            if not payload.get("from_cid"):
+                payload["from_cid"] = networking_app_contact_id
+            if not payload.get("to_cid"):
+                payload["to_cid"] = networking_app_contact_id
+
+            # Skip self-referential
+            if payload["from_cid"] == payload["to_cid"]:
+                conn.execute(
+                    "UPDATE pending_object_routes SET status = 'released', released_at = datetime('now') WHERE id = ?",
+                    (route["id"],),
+                )
+                released += 1
+                continue
+
+            edge_payload = {
+                "contactAId": payload["from_cid"],
+                "contactBId": payload["to_cid"],
+                "relationshipType": payload.get("edge_type", "knows"),
+                "strength": int(payload.get("strength", 0.5) * 5) + 1,
+                "source": "sauron",
+                "observationSource": f"Conversation {route['conversation_id'][:8]}",
+                "sourceSystem": payload.get("sourceSystem", "sauron"),
+                "sourceId": payload.get("sourceId", route["conversation_id"]),
+            }
+            ok, err = _api_call(
+                "POST", f"{NETWORKING_APP_URL}/api/contact-relationships", edge_payload
+            )
+            if ok:
+                conn.execute(
+                    "UPDATE pending_object_routes SET status = 'released', released_at = datetime('now') WHERE id = ?",
+                    (route["id"],),
+                )
+                released += 1
+            else:
+                logger.warning(f"Failed to replay pending route {route['id'][:8]}: {err}")
+
+        else:
+            # Future route types (provenance, etc.) can be handled here
+            logger.debug(f"Unsupported pending route type: {route['route_type']}")
+
+    if released:
+        conn.commit()
+        logger.info(f"Replayed {released}/{len(pending)} pending object routes for entity {entity_id[:8]}")
+
+    return released
+
+
 @router.get("")
 def list_contacts(limit: int = 500):
     """List all unified contacts with conversation counts."""
@@ -514,6 +586,7 @@ def link_provisional_to_existing(contact_id: str, request: ProvisionalLinkReques
                     target_dict["networking_app_contact_id"],
                     conn,
                 )
+                _replay_pending_object_routes(contact_id, new_id, conn)
             except Exception:
                 logger.exception(f"Failed to release pending routes after merge for {contact_id[:8]}")
 
@@ -624,6 +697,7 @@ def confirm_provisional_contact(contact_id: str, request: ProvisionalConfirmRequ
                         try:
                             from sauron.routing.routing_log import release_pending_routes
                             release_pending_routes(contact_id, str(net_id), conn)
+                            _replay_pending_object_routes(contact_id, str(net_id), conn)
                         except Exception:
                             logger.exception(f"Failed to release pending routes for {contact_id[:8]}")
             except Exception as e:
@@ -666,6 +740,14 @@ def dismiss_provisional_contact(contact_id: str):
         # Clear subject_entity_id on event_claims (leave subject_name as-is)
         conn.execute(
             "UPDATE event_claims SET subject_entity_id = NULL WHERE subject_entity_id = ?",
+            (contact_id,),
+        )
+
+        # Mark any held pending_object_routes as dismissed
+        conn.execute(
+            """UPDATE pending_object_routes
+               SET status = 'dismissed', released_at = datetime('now')
+               WHERE blocked_on_entity = ? AND status = 'pending'""",
             (contact_id,),
         )
 

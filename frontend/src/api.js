@@ -434,3 +434,17 @@ export const api = {
   routingPreview: (conversationId) =>
     fetchJSON(`/conversations/${conversationId}/routing-preview`),
 };
+
+
+// Routing visibility (degraded-state)
+export async function fetchRoutingSummary(conversationId) {
+  const res = await fetch(`/api/conversations/${conversationId}/routing-summary`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchPendingRoutes(by = "entity") {
+  const res = await fetch(`/api/routing/pending?by=${by}`);
+  if (!res.ok) return [];
+  return res.json();
+}

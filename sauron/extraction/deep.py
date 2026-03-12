@@ -117,6 +117,33 @@ Output valid JSON matching this schema:
   "what_changed": {
     "person_name": "Summary of what changed for this person since context indicates last interaction"
   },
+    "provenance_observations": [
+    {
+      "contact_name": "Full Name",
+      "introduced_by": "Name of introducer or null",
+      "discovered_via": "referral | conference | cold_outreach | mutual_friend | colleague | conversation",
+      "context": "Brief description of how the connection was established",
+      "source_claim_id": "claim ID if traceable"
+    }
+  ],
+  "status_changes": [
+    {
+      "contact_name": "Full Name",
+      "change_type": "job_change | promotion | departure | relocation | title_change",
+      "details": "Description of the status change",
+      "effective_date": "Date if mentioned, or null",
+      "source_claim_id": "claim ID if traceable"
+    }
+  ],
+  "org_intelligence": [
+    {
+      "organization": "Organization Name",
+      "intel_type": "restructuring | hiring | funding | policy_change | acquisition | expansion",
+      "details": "Description of the organizational intelligence",
+      "mentioned_by": "Contact name who mentioned it, or null",
+      "source_claim_id": "claim ID if traceable"
+    }
+  ],
   "context_classification": "confirmed or refined classification"
 }
 

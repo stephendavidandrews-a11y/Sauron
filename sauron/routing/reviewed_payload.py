@@ -21,7 +21,7 @@ def build_reviewed_payload(conversation_id: str) -> dict:
     try:
         # Load triage (pass 1 — usually not corrected by review)
         triage_row = conn.execute(
-            "SELECT extraction_json FROM extractions WHERE conversation_id = ? AND pass_number = 1",
+            "SELECT extraction_json FROM extractions WHERE conversation_id = ? AND pass_number = 1 ORDER BY created_at DESC",
             (conversation_id,),
         ).fetchone()
         triage = json.loads(triage_row["extraction_json"]) if triage_row else {}
@@ -40,7 +40,7 @@ def build_reviewed_payload(conversation_id: str) -> dict:
 
         # Load memory_writes and new_contacts from claims pass (pass 2)
         claims_pass_row = conn.execute(
-            "SELECT extraction_json FROM extractions WHERE conversation_id = ? AND pass_number = 2",
+            "SELECT extraction_json FROM extractions WHERE conversation_id = ? AND pass_number = 2 ORDER BY created_at DESC",
             (conversation_id,),
         ).fetchone()
         claims_pass_data = json.loads(claims_pass_row["extraction_json"]) if claims_pass_row else {}
@@ -108,7 +108,7 @@ def build_reviewed_payload(conversation_id: str) -> dict:
 
         # Load synthesis (pass 3) for non-commitment fields
         synth_row = conn.execute(
-            "SELECT extraction_json FROM extractions WHERE conversation_id = ? AND pass_number = 3",
+            "SELECT extraction_json FROM extractions WHERE conversation_id = ? AND pass_number = 3 ORDER BY created_at DESC",
             (conversation_id,),
         ).fetchone()
         synthesis = json.loads(synth_row["extraction_json"]) if synth_row else {}

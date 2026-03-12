@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
+import { fetchRoutingSummary, fetchPendingRoutes } from '../api';
 
 export const C = {
   bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
@@ -28,6 +29,58 @@ export const errorTypes = [
   { value: 'wrong_stability', label: 'Wrong stability' },
 ];
 
+
+// ---- Routing Status Chip (degraded-state visibility) ----
+function RoutingChip({ summary, expanded, onToggle }) {
+  const rs = summary;
+  const chipMap = {
+    success: { bg: '#10b98122', color: '#10b981', border: '#10b98144', label: '✓ Routed' },
+    partial_secondary_loss: { bg: '#f59e0b22', color: '#f59e0b', border: '#f59e0b44', label: '⚠ Partial' },
+    failed: { bg: '#ef444422', color: '#ef4444', border: '#ef444444', label: '✗ Failed' },
+  };
+  const chip = rs ? (chipMap[rs.final_state] || chipMap.failed) : null;
+  const isExpandable = rs && rs.final_state !== 'success';
+  return (
+    <div style={{ marginTop: 6 }}>
+      <span
+        onClick={() => isExpandable && onToggle()}
+        style={{
+          display: 'inline-block', fontSize: 11, padding: '2px 10px', borderRadius: 12,
+          background: chip ? chip.bg : '#6b728022', color: chip ? chip.color : '#6b7280',
+          border: '1px solid ' + (chip ? chip.border : '#6b728044'),
+          cursor: isExpandable ? 'pointer' : 'default', fontWeight: 500,
+        }}>
+        {chip ? chip.label : '— Not routed'}
+      </span>
+      {expanded && rs && (
+        <div style={{ background: '#1a1f2e', borderRadius: 8, padding: 12, marginTop: 8, fontSize: 13 }}>
+          <div style={{ marginBottom: 8, color: '#e5e7eb' }}>
+            <strong>Core lanes:</strong> {(rs.core_lanes || []).filter(l => l.status === 'success').length}/{(rs.core_lanes || []).length} succeeded
+          </div>
+          <div style={{ marginBottom: 8, color: '#e5e7eb' }}>
+            <strong>Secondary lanes:</strong> {(rs.secondary_lanes || []).filter(l => l.status === 'success').length}/{(rs.secondary_lanes || []).length} succeeded
+          </div>
+          {(rs.secondary_lanes || []).filter(l => l.status !== 'success').map((lane, i) => (
+            <div key={i} style={{ color: lane.status === 'failed' ? '#ef4444' : '#f59e0b', marginLeft: 12, marginBottom: 4 }}>
+              {lane.name}: {lane.status} {lane.reason ? '— ' + lane.reason : ''}
+            </div>
+          ))}
+          {(rs.core_lanes || []).filter(l => l.status !== 'success').map((lane, i) => (
+            <div key={'c' + i} style={{ color: '#ef4444', marginLeft: 12, marginBottom: 4 }}>
+              {lane.name}: {lane.status} {lane.reason ? '— ' + lane.reason : ''}
+            </div>
+          ))}
+          {rs.pending_entities && rs.pending_entities.length > 0 && (
+            <div style={{ marginTop: 8, color: '#a78bfa' }}>
+              Pending: {rs.pending_entities.join(', ')}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ConversationDetail() {
   const { id } = useParams();
   const [data, setData] = useState(null);
@@ -45,6 +98,15 @@ export default function ConversationDetail() {
   const [peopleStatus, setPeopleStatus] = useState(null);
   const [claims, setClaims] = useState([]);
 
+  // Routing status for degraded-state visibility
+  const [routingSummary, setRoutingSummary] = useState(null);
+  const [routingExpanded, setRoutingExpanded] = useState(false);
+  useEffect(() => {
+    fetchRoutingSummary(id).then(summaries => {
+      if (summaries.length > 0) setRoutingSummary(summaries[0]);
+    });
+  }, [id]);
+
   const reload = useCallback(() => {
     setLoading(true);
     setRefreshKey(k => k + 1);
@@ -54,6 +116,14 @@ export default function ConversationDetail() {
   useEffect(() => {
     reload();
     api.contacts(500).then(d => setContactsList(d.contacts || [])).catch(() => {});
+  }, [id]);
+
+  // Pending routes by entity (for people review)
+  const [pendingEntities, setPendingEntities] = useState([]);
+  useEffect(() => {
+    fetchPendingRoutes('entity').then(items => {
+      setPendingEntities(items || []);
+    });
   }, [id]);
 
   // Sync claims from data load
@@ -176,6 +246,8 @@ export default function ConversationDetail() {
           <p className="text-sm text-text-dim mt-1">
             {convo.source || 'unknown'} &middot; {(convo.captured_at || convo.created_at)?.slice(0, 10) || ''} &middot; {convo.processing_status || ''}
           </p>
+          {/* Routing status chip */}
+          <RoutingChip summary={routingSummary} expanded={routingExpanded} onToggle={() => setRoutingExpanded(e => !e)} />
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {/* Reassign Speaker button */}
@@ -264,7 +336,7 @@ export default function ConversationDetail() {
       )}
 
       {/* Layer 1: People resolution */}
-      <PeopleReviewBanner key={`people-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} onPeopleLoaded={setPeopleStatus} />
+      <PeopleReviewBanner key={`people-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} onPeopleLoaded={setPeopleStatus} pendingEntities={pendingEntities} />
 
       {/* Layer 2: Relational references (unchanged) */}
       <RelationalReferencesBanner key={`rel-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} />
@@ -2377,7 +2449,7 @@ export function RelationalReferencesBanner({
 
 export function PeopleReviewBanner({
   conversationId, contacts, onResolved, onPeopleLoaded,
-  initialPeople,
+  initialPeople, pendingEntities: pendingEntitiesProp,
   loadPeopleFn = api.conversationPeople,
   confirmPersonFn = api.confirmPerson,
   skipPersonFn = api.skipPerson,
@@ -2548,6 +2620,13 @@ export function PeopleReviewBanner({
 
   // Determine banner color based on state
   const bannerColor = allGreen ? C.success : (redPeople.length > 0 ? C.warning : C.warning);
+
+  // Match pending routes to people in this conversation
+  const pendingByName = {};
+  (pendingEntitiesProp || []).forEach(pe => {
+    const name = (pe.blocked_on_entity || '').toLowerCase();
+    pendingByName[name] = pe.count;
+  });
   const inputStyle = {
     width: '100%', padding: '5px 8px', fontSize: 12, borderRadius: 4,
     background: C.bg, color: C.text, border: '1px solid ' + C.border,
@@ -2572,6 +2651,19 @@ export function PeopleReviewBanner({
       </div>
     );
   }
+
+  // Pending route badge helper for person rows
+  const pendingBadgeFor = (person) => {
+    const name = (person.canonical_name || person.original_name || '').toLowerCase();
+    const count = pendingByName[name];
+    if (!count) return null;
+    return (
+      <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600,
+        background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44', marginLeft: 4 }}>
+        {count} pending route{count !== 1 ? 's' : ''}
+      </span>
+    );
+  };
 
   const renderStatusDot = (status) => {
     const color = status === 'confirmed' ? C.success : status === 'auto_resolved' ? C.warning : status === 'skipped' ? C.textDim : C.danger;
@@ -2671,6 +2763,7 @@ export function PeopleReviewBanner({
                     ({person.claim_count} claim{person.claim_count !== 1 ? 's' : ''}{person.unlinked_claim_count > 0 ? `, ${person.unlinked_claim_count} unlinked` : ''})
                   </span>
                 )}
+                {pendingBadgeFor(person)}
                 {person.unlinked_claim_count > 0 && person.entity_id && (
                   <button onClick={() => handleLinkRemaining(person)} disabled={isLoading}
                     style={{

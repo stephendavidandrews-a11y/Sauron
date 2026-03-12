@@ -1233,8 +1233,13 @@ def _create_provisional_contacts(conn, conversation_id: str, claims_result):
     created = 0
     linked = 0
 
-    for name in claims_result.new_contacts_mentioned:
-        name = name.strip()
+    for mention in claims_result.new_contacts_mentioned:
+        # Handle both string and structured NewContactMention
+        if isinstance(mention, str):
+            name = mention.strip()
+        else:
+            # Structured NewContactMention object
+            name = (getattr(mention, 'name', '') or '').strip()
         if not name:
             continue
 

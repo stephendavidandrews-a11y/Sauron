@@ -385,6 +385,9 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         # ── Step 14: v16 synthesis entity links (Entity Resolution Phase 1) ──
         _run_v16_synthesis_entity_links(conn)
 
+        # ── Step 15: v18 routing summaries (degraded-state visibility) ──
+        _run_v18_routing_summaries(conn)
+
         conn.commit()
         logger.info("Migration complete.")
 
@@ -489,6 +492,24 @@ def _run_v7_migration(conn):
         logger.info(f"  Added {added} v7 columns")
     else:
         logger.info("  v7 columns already present")
+
+    # ── v17: pending_object_routes (Category 2, Step C) ──
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pending_object_routes (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            route_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            blocked_on_entity TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now')),
+            released_at TEXT,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_routes_entity ON pending_object_routes(blocked_on_entity)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_routes_status ON pending_object_routes(released_at)")
+
     conn.commit()
 
 
@@ -566,6 +587,33 @@ def _run_v16_synthesis_entity_links(conn):
         CREATE INDEX IF NOT EXISTS idx_sel_entity ON synthesis_entity_links(resolved_entity_id);
     """)
     logger.info("  synthesis_entity_links table created (or already exists)")
+
+
+def _run_v18_routing_summaries(conn):
+    """v18: Add routing_summaries table for degraded-state visibility."""
+    logger.info("Running v18 migration (routing_summaries table)...")
+    if not _table_exists(conn, "routing_summaries"):
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS routing_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                routing_attempt_id TEXT NOT NULL,
+                trigger_type TEXT NOT NULL,
+                final_state TEXT NOT NULL,
+                core_lanes TEXT NOT NULL,
+                secondary_lanes TEXT NOT NULL,
+                pending_entities TEXT,
+                warning_count INTEGER DEFAULT 0,
+                error_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_rs_conversation ON routing_summaries(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_rs_state ON routing_summaries(final_state);
+        """)
+        logger.info("  routing_summaries table created")
+    else:
+        logger.info("  routing_summaries table already exists")
 
 
 if __name__ == "__main__":

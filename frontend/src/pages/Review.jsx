@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { fetchPendingRoutes } from '../api';
 
 export const C = {
   bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
@@ -871,6 +872,20 @@ export default function Review() {
   const [loading, setLoading] = useState(true);
   const [quickPassMode, setQuickPassMode] = useState(false);
 
+  // Pending routes for degraded-state visibility
+  const [pendingRouteCount, setPendingRouteCount] = useState(0);
+  const [pendingEntityCount, setPendingEntityCount] = useState(0);
+  const [pendingEntities, setPendingEntities] = useState([]);
+  useEffect(() => {
+    fetchPendingRoutes(conversation).then(items => {
+      setPendingRouteCount(items.length);
+    });
+    fetchPendingRoutes(entity).then(items => {
+      setPendingEntityCount(items.length);
+      setPendingEntities(items);
+    });
+  }, []);
+
   const handleDiscardConversation = async (convId) => {
     if (!window.confirm('Discard this conversation?')) return;
     try {
@@ -957,6 +972,11 @@ export default function Review() {
     <div style={{ padding: '24px 0' }} data-testid="review-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: C.text, margin: 0 }}>Review</h1>
+          {pendingRouteCount > 0 && (
+            <span style={{ background: '#7c3aed', color: 'white', borderRadius: 12, padding: '2px 10px', fontSize: 12, display: 'inline-block', marginLeft: 8, verticalAlign: 'middle', fontWeight: 600 }}>
+              {pendingRouteCount} pending route{pendingRouteCount !== 1 ? 's' : ''}
+            </span>
+          )}
         {/* Quick Pass toggle + Queue count summary */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {claimReview.length > 0 && (
@@ -1076,6 +1096,38 @@ export default function Review() {
                 </span>
               </Link>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* 3.5. Pending Routes (purple) */}
+      {pendingEntityCount > 0 && (
+        <div style={sectionStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <h3 style={sectionTitle}>Pending Routes</h3>
+            <QueueBadge count={pendingEntityCount} color={C.purple} />
+          </div>
+          <p style={{ fontSize: 13, color: C.textDim, marginBottom: 16, marginTop: 4 }}>
+            Entities with claims held from routing until review is complete.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {pendingEntities.slice(0, 10).map((pe, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px', fontSize: 13 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <StatusDot color={C.purple} />
+                  <span style={{ color: C.text }}>{pe.blocked_on_entity}</span>
+                  <span style={{ color: C.textDim, fontSize: 11 }}>
+                    {pe.count} claim{pe.count !== 1 ? 's' : ''} across {pe.conversation_ids?.length || 0} conversation{(pe.conversation_ids?.length || 0) !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {pendingEntityCount > 10 && (
+              <div style={{ padding: '4px 12px', fontSize: 12, color: C.textDim }}>
+                ...and {pendingEntityCount - 10} more
+              </div>
+            )}
           </div>
         </div>
       )}

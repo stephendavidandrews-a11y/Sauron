@@ -619,6 +619,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
     conn.executescript(SCHEMA_SQL)
     conn.executescript(ROUTING_LOG_SQL)
     conn.executescript(SYNTHESIS_ENTITY_LINKS_SQL)
+    conn.executescript(ROUTING_SUMMARIES_SQL)
     conn.close()
     print(f"Database initialized at {db_path}")
 
@@ -658,6 +659,28 @@ CREATE INDEX IF NOT EXISTS idx_transcript_annotations_segment
 
 if __name__ == "__main__":
     init_db()
+
+
+# ── V18: Routing summaries (degraded-state visibility) ──────
+
+ROUTING_SUMMARIES_SQL = """
+CREATE TABLE IF NOT EXISTS routing_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    routing_attempt_id TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    final_state TEXT NOT NULL,
+    core_lanes TEXT NOT NULL,
+    secondary_lanes TEXT NOT NULL,
+    pending_entities TEXT,
+    warning_count INTEGER DEFAULT 0,
+    error_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_rs_conversation ON routing_summaries(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_rs_state ON routing_summaries(final_state);
+"""
 
 # ── V15: Routing log (Sauron ↔ Networking integration) ──────────
 
@@ -703,4 +726,18 @@ CREATE TABLE IF NOT EXISTS synthesis_entity_links (
 );
 CREATE INDEX IF NOT EXISTS idx_sel_conversation ON synthesis_entity_links(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_sel_entity ON synthesis_entity_links(resolved_entity_id);
+
+CREATE TABLE IF NOT EXISTS pending_object_routes (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    route_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    blocked_on_entity TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    released_at TEXT,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_routes_entity ON pending_object_routes(blocked_on_entity);
+CREATE INDEX IF NOT EXISTS idx_pending_routes_status ON pending_object_routes(released_at);
 """
