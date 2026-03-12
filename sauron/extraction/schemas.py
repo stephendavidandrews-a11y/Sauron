@@ -123,6 +123,8 @@ class NewContactMention(BaseModel):
     connectionTo: str | None = None
     mentionedBy: str | None = None
     confidence: float | None = None
+    source_claim_id: str = ""       # Cat4 Step G: ties back to originating claim
+    introduced_by: str = ""         # Cat4 Step G: provenance — who introduced this person
 
 
 class ClaimsResult(BaseModel):
@@ -219,6 +221,12 @@ class CalendarEvent(BaseModel):
     title: str
     suggested_date: str | None = None
     attendees: list[str] = Field(default_factory=list)
+    original_words: str = ""        # Cat4 Step F: verbatim scheduling language
+    start_time: str = ""            # Cat4 Step F: ISO datetime if extractable
+    end_time: str = ""              # Cat4 Step F: ISO datetime if extractable
+    location: str = ""              # Cat4 Step F: meeting location if mentioned
+    is_placeholder: bool = False    # Cat4 Step F: True if time is inferred
+    source_claim_id: str = ""       # Cat4 Step F: traceable claim
 
 
 class FollowUp(BaseModel):
@@ -234,6 +242,8 @@ class StatusChange(BaseModel):
     details: str
     effective_date: str | None = None
     source_claim_id: str | None = None
+    from_state: str = ""    # Cat4 Step C: e.g. "VP at Goldman"
+    to_state: str = ""      # Cat4 Step C: e.g. "MD at Morgan Stanley"
 
 
 class OrgIntelligence(BaseModel):
@@ -254,6 +264,8 @@ class OrgIntelligence(BaseModel):
     relationship_type: str | None = None  # for org_relationship: acquisition | partnership | subsidiary | competitor | regulator_of
     mentioned_by: str | None = None  # contact who mentioned it
     source_claim_id: str | None = None
+    org_category: str = ""      # Cat4 Step H: industry category if discernible
+    org_size: str = ""          # Cat4 Step H: startup, mid-market, enterprise, government_agency
 
 
 class ProvenanceObservation(BaseModel):
@@ -283,6 +295,46 @@ class AffiliationMention(BaseModel):
     change_type: str | None = None  # new_role | departure | promotion | null=static mention
     source_claim_id: str | None = None
     confidence: float = 0.7
+
+
+# NOTE (Cat4 Step I): Pretexts (reasons to reach out) are a downstream derivation
+# combining asks, commitments, standing_offers, scheduling_leads, and follow_ups.
+# Staged for routing-layer implementation, not extracted directly by Opus.
+
+
+class ReferencedResource(BaseModel):
+    """A resource (book, article, tool, website, framework) mentioned in conversation."""
+    resource_type: str = ""          # book, article, tool, website, framework, podcast, course, etc.
+    title: str = ""
+    author: str = ""
+    url: str = ""
+    description: str = ""
+    mentioned_by: str = ""           # speaker who mentioned it
+    context: str = ""                # why it was mentioned
+    contact_name: str = ""           # person it's associated with (for routing)
+    source_claim_id: str = ""
+
+
+class Ask(BaseModel):
+    """An explicit or soft ask made during conversation."""
+    ask_type: str = ""               # direct_ask, soft_ask, implied_need, favor, introduction_request
+    description: str = ""
+    original_words: str = ""
+    asked_by: str = ""               # speaker
+    asked_of: str = ""               # who is being asked (me, them, specific person)
+    contact_name: str = ""           # resolved contact name for routing
+    urgency: str = ""                # low, medium, high
+    status: str = ""                 # open, fulfilled, declined, deferred
+    source_claim_id: str = ""
+
+
+class LifeEvent(BaseModel):
+    """A significant personal life event mentioned in conversation."""
+    event_type: str = ""             # marriage, birth, death, graduation, move, retirement, health, milestone
+    description: str = ""
+    contact_name: str = ""           # person the event is about
+    approximate_date: str = ""       # when it happened/will happen
+    source_claim_id: str = ""
 
 
 class SynthesisResult(BaseModel):
@@ -321,6 +373,11 @@ class SynthesisResult(BaseModel):
     status_changes: list[StatusChange] = Field(default_factory=list)
     org_intelligence: list[OrgIntelligence] = Field(default_factory=list)
     affiliation_mentions: list[AffiliationMention] = Field(default_factory=list)
+
+    # Cat4: New extraction objects
+    referenced_resources: list[ReferencedResource] = Field(default_factory=list)
+    asks: list[Ask] = Field(default_factory=list)
+    life_events: list[LifeEvent] = Field(default_factory=list)
 
     # What changed per person
     what_changed: dict[str, str] = Field(

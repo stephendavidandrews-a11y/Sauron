@@ -1,5 +1,10 @@
 """Route extraction results to the Networking App.
 
+# Architecture note (Cat4 Step J): Direct-write pattern confirmed.
+# Sauron extracts structured intelligence -> routes directly to Networking API endpoints.
+# No intermediate queue, batch job, or Networking-side re-extraction.
+# Each routing lane maps a synthesis field to an API POST/PATCH call.
+
 Uses review-gated direct writes with all-or-nothing routing per conversation.
 If any API call fails, the entire conversation is logged as a single
 'conversation_bundle' failure and can be retried as a unit.
@@ -639,7 +644,7 @@ def _execute_routing(
             "action": res.get("action", "reference_only"),
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
-            "sourceClaimId": res.get("claim_id"),
+            "sourceClaimId": res.get("source_claim_id"),
         }
         ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/referenced-resources", res_payload
@@ -702,11 +707,24 @@ def _execute_routing(
             logger.debug(f"Skipping status_change[{idx}]: could not resolve '{contact_name}'")
             continue
 
+        # Build description with from/to state context when available (Cat4 Step C)
+        _sc_details = sc.get("details", "")
+        _sc_from = sc.get("from_state", "")
+        _sc_to = sc.get("to_state", "")
+        if _sc_from or _sc_to:
+            _transition_parts = []
+            if _sc_from:
+                _transition_parts.append(f"From: {_sc_from}")
+            if _sc_to:
+                _transition_parts.append(f"To: {_sc_to}")
+            _transition_line = " \u2192 ".join(_transition_parts)
+            _sc_details = f"{_transition_line}\n{_sc_details}" if _sc_details else _transition_line
+
         sc_payload = {
             "contactId": sc_contact_id,
             "signalType": "status_change",
             "title": f"{contact_name}: {sc.get('change_type', 'update')}",
-            "description": sc.get("details", ""),
+            "description": _sc_details,
             "sourceName": "sauron",
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
@@ -816,35 +834,51 @@ def _execute_routing(
         if not title:
             continue
         suggested_date = cal_event.get("suggested_date")
+        start_time = cal_event.get("start_time", "")
+        end_time = cal_event.get("end_time", "")
+        location = cal_event.get("location", "")
+        original_words = cal_event.get("original_words", "")
+        is_placeholder = cal_event.get("is_placeholder", False)
         attendees = cal_event.get("attendees", [])
 
-        # Build description: include conversation context + attendee names
+        # Build description: include conversation context + attendee names (Cat4 Step F)
         desc_parts = [f"Source: Sauron conversation {conversation_id[:8]}"]
         if attendees:
             desc_parts.append(f"Mentioned attendees: {', '.join(attendees)}")
-        cal_description = "\n".join(desc_parts)
+        if original_words:
+            desc_parts.append(f'Original words: "{original_words}"')
 
         cal_payload = {
             "summary": title,
-            "description": cal_description,
         }
-        # Only include start/end if we have a suggested date
-        if suggested_date:
-            # Extraction provides YYYY-MM-DD only (no time); use 9am-10am ET
-            # as a placeholder and flag it explicitly in the description.
+
+        # Use explicit start_time/end_time if available (ISO datetime from extraction)
+        if start_time:
+            cal_payload["start"] = start_time
+            cal_payload["end"] = end_time or start_time  # fallback end = start
+            if is_placeholder:
+                desc_parts.append(
+                    "Note: Time is an inferred placeholder, not explicitly stated."
+                )
+        elif suggested_date:
+            # Fallback: date only -> 9am-10am ET placeholder
             cal_payload["start"] = f"{suggested_date}T09:00:00-05:00"
             cal_payload["end"] = f"{suggested_date}T10:00:00-05:00"
             desc_parts.append(
                 "Time placeholder inferred by Sauron; "
                 "original extraction only provided a date."
             )
-            cal_payload["description"] = "\n".join(desc_parts)
         else:
-            # No date → skip (can't create event without a time)
+            # No date or time -> skip
             logger.debug(
-                f"Skipping calendar_event '{title}': no suggested_date"
+                f"Skipping calendar_event '{title}': no date or time available"
             )
             continue
+
+        cal_payload["description"] = "\n".join(desc_parts)
+
+        if location:
+            cal_payload["location"] = location
 
         ok, err, _resp = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/calendar/events", cal_payload
@@ -862,6 +896,124 @@ def _execute_routing(
         secondary_lane_results.append({"name": "calendar_events", "status": "success"})
     else:
         secondary_lane_results.append({"name": "calendar_events", "status": "skipped_no_data"})
+
+    # 17. Asks (secondary — non-fatal)
+    #     Routes asks from synthesis to /api/commitments with kind="soft_ask".
+    #     Asks are a form of commitment — someone is asking someone to do something.
+    #     Using the commitment infrastructure gives us provenance, dedup, and tracking.
+    _asks_list = synthesis.get("asks", [])
+    logger.info(f"Lane 17 asks: {len(_asks_list)} items found in synthesis")
+    for idx, ask in enumerate(_asks_list):
+        contact_name = ask.get("contact_name", "") or ask.get("asked_of", "")
+        if not contact_name:
+            ask_cid = networking_app_contact_id
+        elif sel_conn is not None:
+            ask_cid = _resolve_with_synthesis_links(
+                sel_conn, conversation_id, "ask", idx,
+                "contact_name", contact_name, networking_app_contact_id,
+            )
+            if ask_cid == _SKIP_SENTINEL:
+                logger.debug(f"Skipping ask[{idx}]: person marked as skipped")
+                continue
+        else:
+            ask_cid = _resolve_contact_id_for_entity(
+                contact_name, networking_app_contact_id
+            )
+
+        if not ask_cid:
+            logger.debug(f"Skipping ask[{idx}]: could not resolve '{contact_name}'")
+            continue
+
+        # Map ask direction to commitment direction
+        asked_by = ask.get("asked_by", "")
+        # If I asked -> they owe me; if they asked -> I owe them
+        if asked_by.lower() in ("me", "i", "stephen"):
+            ask_direction = "they_owe"
+        else:
+            ask_direction = "i_owe"
+
+        ask_payload = {
+            "contactId": ask_cid,
+            "description": ask.get("description", ""),
+            "direction": ask_direction,
+            "kind": "soft_ask",
+            "firmness": "tentative" if ask.get("ask_type") == "soft_ask" else "intentional",
+            "sourceSystem": "sauron",
+            "sourceId": conversation_id,
+            "sourceClaimId": ask.get("source_claim_id"),
+        }
+
+        ok, err, _resp = _api_call(
+            "POST", f"{NETWORKING_APP_URL}/api/commitments", ask_payload
+        )
+        if ok:
+            successes.append(("ask_commitment", ask_payload))
+        else:
+            secondary_errors.append(("ask_commitment", ask_payload, err))
+
+    # Summarize asks lane
+    ask_errs = [e for c, _, e in secondary_errors if c == "ask_commitment"]
+    if ask_errs:
+        secondary_lane_results.append({"name": "asks", "status": "failed", "reason": ask_errs[0]})
+    elif any(c == "ask_commitment" for c, _ in successes):
+        secondary_lane_results.append({"name": "asks", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "asks", "status": "skipped_no_data"})
+
+    # 18. Life events from synthesis (secondary — non-fatal)
+    #     Synthesis-level life_events complement Lane 6 (claims memory_writes).
+    #     Routes to existing /api/contacts/{id}/life-events endpoint.
+    _le_list = synthesis.get("life_events", [])
+    logger.info(f"Lane 18 life_events: {len(_le_list)} items found in synthesis")
+    for idx, le in enumerate(_le_list):
+        contact_name = le.get("contact_name", "")
+        if not contact_name:
+            le_cid = networking_app_contact_id
+        elif sel_conn is not None:
+            le_cid = _resolve_with_synthesis_links(
+                sel_conn, conversation_id, "life_event", idx,
+                "contact_name", contact_name, networking_app_contact_id,
+            )
+            if le_cid == _SKIP_SENTINEL:
+                logger.debug(f"Skipping life_event[{idx}]: person marked as skipped")
+                continue
+        else:
+            le_cid = _resolve_contact_id_for_entity(
+                contact_name, networking_app_contact_id
+            )
+
+        if not le_cid:
+            logger.debug(f"Skipping life_event[{idx}]: could not resolve '{contact_name}'")
+            continue
+
+        le_payload = {
+            "description": le.get("description", ""),
+            "person": contact_name or "unknown",
+            "eventType": le.get("event_type", "custom"),
+            "eventDate": le.get("approximate_date"),
+            "sourceSystem": "sauron",
+            "sourceId": conversation_id,
+            "sourceClaimId": le.get("source_claim_id"),
+        }
+
+        ok, err, _resp = _api_call(
+            "POST",
+            f"{NETWORKING_APP_URL}/api/contacts/{le_cid}/life-events",
+            le_payload,
+        )
+        if ok:
+            successes.append(("synthesis_life_event", le_payload))
+        else:
+            secondary_errors.append(("synthesis_life_event", le_payload, err))
+
+    # Summarize synthesis life_events lane
+    sle_errs = [e for c, _, e in secondary_errors if c == "synthesis_life_event"]
+    if sle_errs:
+        secondary_lane_results.append({"name": "synthesis_life_events", "status": "failed", "reason": sle_errs[0]})
+    elif any(c == "synthesis_life_event" for c, _ in successes):
+        secondary_lane_results.append({"name": "synthesis_life_events", "status": "success"})
+    else:
+        secondary_lane_results.append({"name": "synthesis_life_events", "status": "skipped_no_data"})
 
         # Summarize status_changes lane
     sc_errs = [e for c, _, e in secondary_errors if c == "status_change_signal"]

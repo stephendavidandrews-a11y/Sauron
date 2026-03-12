@@ -208,7 +208,9 @@ Output ONLY valid JSON — no preamble, no commentary, no markdown fences:
       "title": null,
       "context": "Brief context of how they were mentioned",
       "connectionTo": "Name of person who knows them (if mentioned)",
-      "mentionedBy": "Speaker who mentioned them"
+      "mentionedBy": "Speaker who mentioned them",
+      "source_claim_id": "claim_xxx that triggered this mention",
+      "introduced_by": "Person who introduced or referred this contact (if applicable)"
     }
   ]
 }

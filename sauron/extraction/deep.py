@@ -110,7 +110,19 @@ Output valid JSON matching this schema:
   ],
   "standing_offers": [{"contact_name": "...", "description": "...", "offered_by": "me|them", "original_words": "..."}],
   "scheduling_leads": [{"contact_name": "...", "description": "...", "original_words": "...", "timeframe": "..."}],
-  "calendar_events": [{"title": "...", "suggested_date": "...", "attendees": ["..."]}],
+  "calendar_events": [
+    {
+      "title": "Event title",
+      "suggested_date": "YYYY-MM-DD",
+      "attendees": ["Person 1", "Person 2"],
+      "original_words": "Verbatim scheduling language from transcript",
+      "start_time": "ISO datetime if explicitly stated, empty if inferred",
+      "end_time": "ISO datetime if explicitly stated, empty if inferred",
+      "location": "Meeting location if mentioned",
+      "is_placeholder": false,
+      "source_claim_id": "claim_xxx if traceable"
+    }
+  ],
   "follow_ups": [{"description": "...", "priority": "high|medium|low", "due_date": "YYYY-MM-DD or null"}],
   "policy_positions": [{"person": "...", "topic": "...", "position": "supports|opposes|undecided", "strength": 0.0-1.0, "notes": "..."}],
   "topics_discussed": ["topic1", "topic2"],
@@ -132,6 +144,8 @@ Output valid JSON matching this schema:
       "change_type": "job_change | promotion | departure | relocation | title_change",
       "details": "Description of the status change",
       "effective_date": "Date if mentioned, or null",
+      "from_state": "Previous state (e.g. 'VP at Goldman') or null if unknown",
+      "to_state": "New state (e.g. 'MD at Morgan Stanley') or null if unknown",
       "source_claim_id": "claim ID if traceable"
     }
   ],
@@ -144,7 +158,9 @@ Output valid JSON matching this schema:
       "related_org": "Other organization name for org_relationship type, or null",
       "relationship_type": "acquisition | partnership | subsidiary | competitor | regulator_of | null",
       "mentioned_by": "Contact name who mentioned it, or null",
-      "source_claim_id": "claim ID if traceable"
+      "source_claim_id": "claim ID if traceable",
+      "org_category": "Industry category if discernible (fintech, banking, government, legal, consulting, tech, etc.) or null",
+      "org_size": "Organization size if mentioned (startup, mid-market, enterprise, government_agency, etc.) or null"
     }
   ],
   "affiliation_mentions": [
@@ -158,6 +174,41 @@ Output valid JSON matching this schema:
       "change_type": "new_role | departure | promotion | null (static mention)",
       "source_claim_id": "claim ID if traceable",
       "confidence": 0.7
+    }
+  ],
+  "referenced_resources": [
+    {
+      "resource_type": "book | article | tool | website | framework | podcast | course | other",
+      "title": "Resource title or name",
+      "author": "Author if known, or null",
+      "url": "URL if mentioned, or null",
+      "description": "Brief description of the resource",
+      "mentioned_by": "Speaker who mentioned it",
+      "context": "Why it came up or why it is relevant",
+      "contact_name": "Person most associated with this resource",
+      "source_claim_id": "claim_xxx if traceable"
+    }
+  ],
+  "asks": [
+    {
+      "ask_type": "direct_ask | soft_ask | implied_need | favor | introduction_request",
+      "description": "What is being asked for",
+      "original_words": "Verbatim words if available",
+      "asked_by": "Speaker name",
+      "asked_of": "Who is being asked (name or 'me')",
+      "contact_name": "Contact name for routing purposes",
+      "urgency": "low | medium | high",
+      "status": "open | fulfilled | declined | deferred",
+      "source_claim_id": "claim_xxx if traceable"
+    }
+  ],
+  "life_events": [
+    {
+      "event_type": "marriage | birth | death | graduation | move | retirement | health | milestone | other",
+      "description": "Brief description of the event",
+      "contact_name": "Person the event is about",
+      "approximate_date": "When it happened or will happen, or null",
+      "source_claim_id": "claim_xxx if traceable"
     }
   ],
   "context_classification": "confirmed or refined classification"
@@ -185,6 +236,10 @@ Key instructions:
   "CME acquired NEX Group" = org_relationship with related_org="NEX Group", relationship_type="acquisition"
   For org_relationship: ALWAYS include the structured related_org and relationship_type fields. Do not flatten into free text only.
   Keep extraction conservative — only emit when clearly grounded in claims.
+- Referenced resources: Extract books, articles, tools, websites, frameworks etc. mentioned in conversation. Only extract if clearly referenced — not passing mentions.
+- Asks: Capture explicit requests, soft asks, implied needs, favors, and introduction requests. "Could you introduce me to..." = introduction_request. "We should look into..." = soft_ask (only if directed at someone). Do NOT conflate with commitments — asks are requests, commitments are promises.
+- Life events: Extract significant personal events (marriage, birth, death, graduation, move, retirement, health milestones). Only when clearly mentioned, not inferred.
+- Calendar events: Include original_words (verbatim scheduling language). If the model extracted an actual time, use start_time/end_time. If only a date or vague reference, set is_placeholder=true.
 - Be specific, not generic. "Heath seemed stressed" is bad. "Heath's jitter +45% when discussing compliance deadline (claim_007) suggests elevated stress about timeline" is good.
 """
 
