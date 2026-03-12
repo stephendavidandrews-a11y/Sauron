@@ -182,14 +182,11 @@ test.describe('People Tab — Consolidated Display', () => {
     // Click it
     await linkBtn.click();
 
-    // Verify API was called with correct payload
-    await page.waitForTimeout(500);
+    // Verify API was called with correct payload — wait for DOM update instead of timeout
+    await expect(linkBtn).not.toBeVisible({ timeout: 3000 });
     expect(apiCalled).toBe(true);
     expect(apiBody.entity_id).toBe('ent-daniel');
     expect(apiBody.subject_name).toBe('Daniel Park');
-
-    // After refresh, "Link 2" button should be gone
-    await expect(linkBtn).not.toBeVisible({ timeout: 3000 });
   });
 
   test('Link N button hidden when no unlinked claims', async ({ page }) => {

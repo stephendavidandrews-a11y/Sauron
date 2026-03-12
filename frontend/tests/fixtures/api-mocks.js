@@ -63,9 +63,9 @@ export const mockConversation = {
 
 export const mockPeople = {
   people: [
-    { original_name: 'Stephen Andrews', canonical_name: 'Stephen Andrews', entity_id: 'c-006', status: 'confirmed', is_self: true, is_provisional: false, claim_count: 1 },
-    { original_name: 'Sarah Chen', canonical_name: 'Sarah Chen', entity_id: 'c-001', status: 'auto_resolved', is_self: false, is_provisional: false, claim_count: 2 },
-    { original_name: 'Mark Weber', canonical_name: 'Mark Weber', entity_id: 'c-002', status: 'confirmed', is_self: false, is_provisional: false, claim_count: 1 },
+    { original_name: 'Stephen Andrews', canonical_name: 'Stephen Andrews', entity_id: 'c-006', status: 'confirmed', is_self: true, is_provisional: false, claim_count: 1, unlinked_claim_count: 0 },
+    { original_name: 'Sarah Chen', canonical_name: 'Sarah Chen', entity_id: 'c-001', status: 'auto_resolved', is_self: false, is_provisional: false, claim_count: 2, unlinked_claim_count: 0 },
+    { original_name: 'Mark Weber', canonical_name: 'Mark Weber', entity_id: 'c-002', status: 'confirmed', is_self: false, is_provisional: false, claim_count: 1, unlinked_claim_count: 0 },
   ],
 };
 
@@ -123,8 +123,10 @@ export const mockReviewResult = {
  */
 export async function mockAllApiRoutes(page) {
   // ─── CATCH-ALL (lowest priority — registered first) ───
+  // Unmatched endpoints fail loudly so tests don't silently pass on wrong URLs
   await page.route('**/api/**', route => {
-    route.fulfill({ json: {} });
+    console.warn('[MOCK] Unhandled API route:', route.request().url());
+    route.fulfill({ status: 500, json: { error: 'unhandled_mock', url: route.request().url() } });
   });
 
   // ─── Review page endpoints ───
@@ -149,6 +151,9 @@ export async function mockAllApiRoutes(page) {
     route.fulfill({ json: { corrections_count: 0, amendments_count: 0 } }));
 
   // ─── Graph ───
+  await page.route('**/api/graph/duplicates*', route =>
+    route.fulfill({ json: { duplicates: [] } }));
+
   await page.route('**/api/graph?*', route =>
     route.fulfill({ json: { edges: [] } }));
 

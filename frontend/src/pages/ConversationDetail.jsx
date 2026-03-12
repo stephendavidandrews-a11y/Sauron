@@ -33,6 +33,7 @@ export default function ConversationDetail() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const [tab, setTab] = useState('episodes');
   const [reprocessing, setReprocessing] = useState(false);
   const [reviewed, setReviewed] = useState(false);
@@ -68,6 +69,11 @@ export default function ConversationDetail() {
     setClaims(prev => [...prev, newClaim]);
   }, []);
 
+  const handleActionError = useCallback((msg) => {
+    setActionError(msg);
+    setTimeout(() => setActionError(null), 6000);
+  }, []);
+
   const handleReprocess = async () => {
     setReprocessing(true);
     try {
@@ -84,7 +90,10 @@ export default function ConversationDetail() {
       if (result.stats) {
         setReviewStats(result.stats);
       }
-    } catch (e) { console.error('Review failed', e); }
+    } catch (e) {
+      console.error('Review failed', e);
+      handleActionError('Mark as reviewed failed \u2014 please retry');
+    }
     setReviewing(false);
   };
 
@@ -239,6 +248,21 @@ export default function ConversationDetail() {
         )}
       </div>
 
+      {/* Action error banner */}
+      {actionError && (
+        <div data-testid="action-error-banner" style={{
+          padding: '8px 14px', marginBottom: 12, borderRadius: 6,
+          background: C.danger + '18', border: '1px solid ' + C.danger + '44',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ color: C.danger, fontSize: 13, fontWeight: 500 }}>{actionError}</span>
+          <button onClick={() => setActionError(null)} style={{
+            background: 'none', border: 'none', color: C.danger, cursor: 'pointer',
+            fontSize: 16, padding: '0 4px', lineHeight: 1,
+          }}>{'\u2715'}</button>
+        </div>
+      )}
+
       {/* Layer 1: People resolution */}
       <PeopleReviewBanner key={`people-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} onPeopleLoaded={setPeopleStatus} />
 
@@ -259,9 +283,9 @@ export default function ConversationDetail() {
         ))}
       </div>
 
-      {tab === 'episodes' && <EpisodesTab episodes={episodes} claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} addClaimToState={addClaimToState} />}
+      {tab === 'episodes' && <EpisodesTab episodes={episodes} claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} addClaimToState={addClaimToState} onActionError={handleActionError} />}
       {tab === 'transcript' && <TranscriptTab transcript={transcript} conversationId={id} contacts={contactsList} />}
-      {tab === 'claims' && <ClaimsTab claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} />}
+      {tab === 'claims' && <ClaimsTab claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} onActionError={handleActionError} />}
       {tab === 'summary' && <SummaryTab synthesis={synthesis} beliefUpdates={beliefUpdates} claims={claims} />}
       {tab === 'raw' && <RawTab extraction={parsedExtraction} />}
 
@@ -521,7 +545,7 @@ export function BulkReassignModal({
 // ═══════════════════════════════════════════════════════
 // EPISODES TAB — Primary Review Surface
 // ═══════════════════════════════════════════════════════
-export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, conversationId, contacts, updateClaim, addClaimToState }) {
+export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, conversationId, contacts, updateClaim, addClaimToState, onActionError }) {
   const [episodes, setEpisodes] = useState(initialEpisodes);
   useEffect(() => { setEpisodes(initialEpisodes); }, [initialEpisodes]);
   const claims = initialClaims;  // Use lifted parent state directly
@@ -581,6 +605,7 @@ export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, 
       console.error('Approve failed', e);
       updateClaim(claimId, { review_status: 'unreviewed' });  // rollback
       setReviewedClaims(prev => { const s = new Set(prev); s.delete(claimId); return s; });
+      if (onActionError) onActionError('Approve failed \u2014 please retry');
     }
   };
 
@@ -597,11 +622,7 @@ export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, 
       claimIds.forEach(cid => updateClaim(cid, { review_status: 'user_confirmed' }));
     } catch (e) {
       console.error('Approve all failed', e);
-      setReviewedClaims(prev => {
-        const next = new Set(prev);
-        epClaims.forEach(c => next.add(c.id));
-        return next;
-      });
+      if (onActionError) onActionError('Approve all failed \u2014 please retry');
     }
   };
 
@@ -791,7 +812,7 @@ export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase' }}>Claims</span>
                       {!allReviewed && (
-                        <button onClick={(e) => { e.stopPropagation(); handleApproveAll(ep.id); }}
+                        <button data-testid={`approve-all-${ep.id}`} onClick={(e) => { e.stopPropagation(); handleApproveAll(ep.id); }}
                           style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, border: `1px solid ${C.success}33`,
                             background: 'transparent', color: C.success, cursor: 'pointer' }}>
                           Approve All
@@ -1644,7 +1665,7 @@ export function TranscriptTab({ transcript, conversationId, contacts }) {
 // ═══════════════════════════════════════════════════════
 // CLAIMS TAB — Flat list
 // ═══════════════════════════════════════════════════════
-export function ClaimsTab({ claims: initialClaims, conversationId, contacts, updateClaim }) {
+export function ClaimsTab({ claims: initialClaims, conversationId, contacts, updateClaim, onActionError }) {
     const claims = initialClaims;
   const [dismissed, setDismissed] = useState(() => {
     const d = {};
@@ -1822,7 +1843,10 @@ export function ClaimsTab({ claims: initialClaims, conversationId, contacts, upd
                   await api.approveClaim(conversationId, id);
                   setReviewedClaims(prev => new Set(prev).add(id));
                   updateClaim(id, { review_status: 'user_confirmed' });
-                } catch (e) { console.error('Approve failed', e); setReviewedClaims(prev => new Set(prev).add(id)); }
+                } catch (e) {
+                  console.error('Approve failed', e);
+                  if (onActionError) onActionError('Approve failed \u2014 please retry');
+                }
               }}
               onDefer={handleDefer} onDismiss={handleDismiss} onEdit={handleEdit}
               onStartEdit={(c) => { setEditingClaim(c.id); setEditText(c.claim_text); }}

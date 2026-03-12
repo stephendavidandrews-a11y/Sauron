@@ -238,4 +238,79 @@ test.describe('Review Flow — Trust-Critical Path', () => {
     await page.getByText('← Back to review').click();
     await expect(page.getByTestId('review-page')).toBeVisible();
   });
+
+
+  // ═══════════════════════════════════════════════════
+  // 5. FAILURE PATH — ROLLBACK + ERROR FEEDBACK (3 tests)
+  // ═══════════════════════════════════════════════════
+
+  test('approve-all API failure does not leave claims visually confirmed', async ({ page }) => {
+    // Override the bulk approve endpoint to return 500
+    await page.route('**/api/correct/approve-claims-bulk', route =>
+      route.fulfill({ status: 500, json: { error: 'server_error' } }));
+
+    await page.goto('/review/conv-test-001');
+    await expect(page.getByTestId('conversation-detail')).toBeVisible();
+
+    // Episodes tab is default; click episode header to expand it
+    await page.getByText('Position limits discussion').click();
+
+    // Wait for claims to render inside the expanded episode
+    const approveAllBtn = page.getByTestId('approve-all-ep-001');
+    await expect(approveAllBtn).toBeVisible({ timeout: 3000 });
+    await approveAllBtn.click();
+
+    // Error banner should appear
+    await expect(page.getByTestId('action-error-banner')).toBeVisible({ timeout: 3000 });
+    await expect(page.getByTestId('action-error-banner')).toContainText('Approve all failed');
+
+    // Claims should NOT be marked as confirmed — approve buttons should still be visible
+    // (claim action buttons inside episodes tab use the same testids)
+    const claim1Approve = page.getByTestId('claim-approve-claim-001');
+    await expect(claim1Approve).toBeVisible();
+  });
+
+  test('ClaimsTab approve API failure does not leave claim visually confirmed', async ({ page }) => {
+    // Override single approve endpoint to return 500
+    await page.route('**/api/correct/approve-claim', route =>
+      route.fulfill({ status: 500, json: { error: 'server_error' } }));
+
+    await page.goto('/review/conv-test-001');
+    await expect(page.getByTestId('conversation-detail')).toBeVisible();
+
+    // Switch to claims tab
+    await page.getByTestId('tab-claims').click();
+
+    const approveBtn = page.getByTestId('claim-approve-claim-001');
+    await expect(approveBtn).toBeVisible();
+    await approveBtn.click();
+
+    // Error banner should appear
+    await expect(page.getByTestId('action-error-banner')).toBeVisible({ timeout: 3000 });
+    await expect(page.getByTestId('action-error-banner')).toContainText('Approve failed');
+
+    // Claim should NOT show confirmed badge — approve button should still be there
+    await expect(approveBtn).toBeVisible();
+    const claimRow = page.getByTestId('claim-row-claim-001');
+    await expect(claimRow.getByText('confirmed')).not.toBeVisible();
+  });
+
+  test('error banner is dismissible by clicking close button', async ({ page }) => {
+    // Override approve to fail
+    await page.route('**/api/correct/approve-claim', route =>
+      route.fulfill({ status: 500, json: { error: 'server_error' } }));
+
+    await page.goto('/review/conv-test-001');
+    await page.getByTestId('tab-claims').click();
+
+    // Trigger error
+    await page.getByTestId('claim-approve-claim-001').click();
+    await expect(page.getByTestId('action-error-banner')).toBeVisible({ timeout: 3000 });
+
+    // Click the close button (✕)
+    await page.getByTestId('action-error-banner').getByRole('button').click();
+
+    // Banner should disappear
+    await expect(page.getByTestId('action-error-banner')).not.toBeVisible();
+  });
 });
