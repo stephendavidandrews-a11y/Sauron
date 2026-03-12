@@ -99,6 +99,7 @@ def _execute_routing(
 ):
     """Inner routing function with DB connection for synthesis_entity_links."""
     errors = []   # [(object_class, payload, error_str)]
+    secondary_errors = []  # non-fatal: interest, activity, signal, resource
     successes = []  # [(object_class, payload)]
 
     # 1. Interaction with inline commitments + follow-ups
@@ -223,6 +224,9 @@ def _execute_routing(
             "contactId": contact_id,
             "interest": mw.get("value", ""),
             "source": "sauron",
+            "sourceSystem": "sauron",
+            "sourceId": conversation_id,
+            "sourceClaimId": mw.get("claim_id"),
         }
         ok, err = _api_call(
             "POST",
@@ -232,7 +236,7 @@ def _execute_routing(
         if ok:
             successes.append(("interest", int_payload))
         else:
-            errors.append(("interest", int_payload, err))
+            secondary_errors.append(("interest", int_payload, err))
 
     # 8. Personal activities
     for mw in claims.get("memory_writes", []):
@@ -247,6 +251,9 @@ def _execute_routing(
             "contactId": contact_id,
             "activity": mw.get("value", ""),
             "source": "sauron",
+            "sourceSystem": "sauron",
+            "sourceId": conversation_id,
+            "sourceClaimId": mw.get("claim_id"),
         }
         ok, err = _api_call(
             "POST",
@@ -256,7 +263,7 @@ def _execute_routing(
         if ok:
             successes.append(("activity", act_payload))
         else:
-            errors.append(("activity", act_payload, err))
+            secondary_errors.append(("activity", act_payload, err))
 
     # 9. Graph edges → ContactRelationship (Phase 4: prefer synthesis_entity_links)
     for idx, edge in enumerate(synthesis.get("graph_edges", [])):
@@ -329,6 +336,7 @@ def _execute_routing(
             "outreachHook": pp.get("notes") or None,
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
+            "sourceClaimId": pp.get("claim_id"),
         }
         ok, err = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/signals", sig_payload
@@ -336,7 +344,7 @@ def _execute_routing(
         if ok:
             successes.append(("intelligence_signal", sig_payload))
         else:
-            errors.append(("intelligence_signal", sig_payload, err))
+            secondary_errors.append(("intelligence_signal", sig_payload, err))
 
     # 11. Referenced resources (Phase D)
     # Extraction layer doesn't yet produce a dedicated referenced_resources list.
@@ -353,6 +361,7 @@ def _execute_routing(
             "action": res.get("action", "reference_only"),
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
+            "sourceClaimId": res.get("claim_id"),
         }
         ok, err = _api_call(
             "POST", f"{NETWORKING_APP_URL}/api/referenced-resources", res_payload
@@ -360,7 +369,7 @@ def _execute_routing(
         if ok:
             successes.append(("referenced_resource", res_payload))
         else:
-            errors.append(("referenced_resource", res_payload, err))
+            secondary_errors.append(("referenced_resource", res_payload, err))
 
     # 12. New contact stubs for triage (Phase D)
     for name in claims.get("new_contacts_mentioned", []):
@@ -389,7 +398,15 @@ def _execute_routing(
         else:
             errors.append(("new_contact_stub", stub_payload, err))
 
-    # ── All-or-nothing verdict ──────────────────────────────────
+    # ── Verdict (secondary failures are non-fatal) ─────────────
+    if secondary_errors:
+        sec_summary = "; ".join(
+            f"{obj}: {err}" for obj, _, err in secondary_errors
+        )
+        logger.warning(
+            f"Routing had {len(secondary_errors)} non-fatal secondary error(s) "
+            f"for conversation {conversation_id[:8]}: {sec_summary}"
+        )
     if errors:
         error_summary = "; ".join(
             f"{obj}: {err}" for obj, _, err in errors
