@@ -51,6 +51,20 @@ def link_synthesis_entities(conversation_id: str) -> dict:
         import json
         synthesis = json.loads(row["extraction_json"])
 
+        # Also load claims extraction (pass 2) for people_mentioned
+        claims_row = conn.execute(
+            """SELECT extraction_json FROM extractions
+               WHERE conversation_id = ? AND pass_number = 2
+               ORDER BY created_at DESC LIMIT 1""",
+            (conversation_id,),
+        ).fetchone()
+        claims_people = []
+        if claims_row:
+            claims_data = json.loads(claims_row["extraction_json"])
+            claims_people = claims_data.get("people_mentioned", [])
+            if claims_people:
+                logger.info(f"[{conversation_id[:8]}] Found {len(claims_people)} people_mentioned from claims extraction")
+
         # Build lookup caches for this conversation
         claim_entity_map = _build_claim_entity_map(conn, conversation_id)
         claim_subject_map = _build_claim_subject_map(conn, conversation_id)
@@ -60,6 +74,16 @@ def link_synthesis_entities(conversation_id: str) -> dict:
 
         # Collect all person references from synthesis objects
         references = _collect_person_references(synthesis)
+
+        # Add people_mentioned from claims extraction (pass 2)
+        for i, name in enumerate(claims_people):
+            if isinstance(name, str) and name.strip():
+                references.append({
+                    "object_type": "people_mentioned",
+                    "object_index": i,
+                    "field_name": "name",
+                    "original_name": name.strip(),
+                })
 
         # Deduplicate by original_name (resolve each unique name once)
         unique_names: dict[str, list[dict]] = {}

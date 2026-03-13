@@ -119,10 +119,12 @@ def process_through_speaker_id(conversation_id: str) -> bool:
 
             if not speakers_already_identified:
                 logger.info(f"[{conversation_id[:8]}] Stage 6: Speaker identification...")
+                # Load stored voice embeddings from DB (saved during original processing)
+                stored_embeddings = _load_stored_embeddings(conn, conversation_id)
                 from sauron.pipeline.diarizer import DiarizationResult, SpeakerSegment
                 diarization = DiarizationResult(
                     segments=[SpeakerSegment(speaker=s, start=0.0, end=aligned.duration) for s in aligned.speakers],
-                    embeddings={},
+                    embeddings=stored_embeddings,
                     num_speakers=len(aligned.speakers),
                 )
                 speaker_map = _run_speaker_identification(conn, conversation_id, diarization, aligned)
@@ -131,7 +133,16 @@ def process_through_speaker_id(conversation_id: str) -> bool:
                 logger.info(f"[{conversation_id[:8]}] Stage 6: Speakers already identified — skipping")
 
             conn.commit()
-            return _continue_to_extraction(conn, conversation_id, aligned, speaker_map, vocal_summary)
+
+            # Auto-advance gate (same check as fresh-processing path)
+            if _check_auto_advance(conn, conversation_id):
+                logger.info(f"[{conversation_id[:8]}] Auto-advance gate PASSED (transcript reuse) — proceeding to extraction")
+                return _continue_to_extraction(conn, conversation_id, aligned, speaker_map, vocal_summary)
+            else:
+                logger.info(f"[{conversation_id[:8]}] Auto-advance gate FAILED (transcript reuse) — pausing for speaker review")
+                _update_status(conn, conversation_id, "awaiting_speaker_review")
+                conn.commit()
+                return True
 
         # Stage 0: Audio preprocessing
         try:
@@ -157,6 +168,15 @@ def process_through_speaker_id(conversation_id: str) -> bool:
         except Exception as e:
             logger.warning(f"[{conversation_id[:8]}] Diarization failed ({type(e).__name__}: {e}) — falling back to single-speaker mode")
             diarization = _single_speaker_fallback(transcription.duration)
+            # Try to recover stored embeddings from a previous processing run
+            stored_emb = _load_stored_embeddings(conn, conversation_id)
+            if stored_emb:
+                diarization = DiarizationResult(
+                    segments=diarization.segments,
+                    embeddings=stored_emb,
+                    num_speakers=len(stored_emb),
+                )
+                logger.info(f"[{conversation_id[:8]}] Recovered {len(stored_emb)} stored embeddings after diarization failure")
 
         # Stage 3: Alignment
         logger.info(f"[{conversation_id[:8]}] Stage 3: Aligning transcript with speakers...")
@@ -743,6 +763,28 @@ def _reconstruct_from_db(conn, conversation_id: str):
     return aligned, speaker_map
 
 
+
+def _load_stored_embeddings(conn, conversation_id: str) -> dict:
+    """Load speaker embeddings from voice_samples table.
+
+    Used when reprocessing (transcript reuse) or recovering from diarization failure.
+    Returns dict of speaker_label -> numpy embedding, same format as diarization.embeddings.
+    """
+    import numpy as np
+    rows = conn.execute(
+        "SELECT speaker_label, embedding FROM voice_samples WHERE source_conversation_id = ? AND embedding IS NOT NULL",
+        (conversation_id,),
+    ).fetchall()
+    embeddings = {}
+    for row in rows:
+        label = row["speaker_label"]
+        emb = np.frombuffer(row["embedding"], dtype=np.float32)
+        embeddings[label] = emb
+    if embeddings:
+        logger.info(f"[{conversation_id[:8]}] Loaded {len(embeddings)} stored voice embeddings from DB")
+    return embeddings
+
+
 def _single_speaker_fallback(duration: float):
     """Create a minimal diarization result with a single speaker."""
     from sauron.pipeline.diarizer import DiarizationResult, SpeakerSegment
@@ -860,6 +902,7 @@ def _run_speaker_identification(conn, conversation_id, diarization, aligned):
         speaker_map = resolve_speakers(
             conversation_id, diarization.embeddings,
             calendar_attendees=calendar_attendees if calendar_attendees else None,
+            conn=conn,
         )
         for label, contact_id in speaker_map.items():
             if contact_id:
@@ -868,8 +911,20 @@ def _run_speaker_identification(conn, conversation_id, diarization, aligned):
                     (contact_id, conversation_id, label),
                 )
         return speaker_map
-    except Exception:
-        logger.exception("Speaker identification failed (non-fatal)")
+    except Exception as e:
+        logger.exception(f"Speaker identification failed (non-fatal): {type(e).__name__}: {e}")
+        # Log the failure so it's visible in voice_match_log
+        try:
+            for label in diarization.embeddings:
+                conn.execute(
+                    """INSERT INTO voice_match_log
+                       (id, conversation_id, speaker_label, matched_profile_id, similarity_score, match_method)
+                       VALUES (?, ?, ?, NULL, 0.0, ?)""",
+                    (str(uuid.uuid4()), conversation_id, label, f"error:{type(e).__name__}"),
+                )
+            conn.commit()
+        except Exception:
+            pass  # Don't fail the pipeline over logging
         return {}
 
 
@@ -1414,7 +1469,18 @@ def _store_belief_updates(conn, conversation_id, synthesis, claims_result):
 
 
 def _store_graph_edges(conn, conversation_id, synthesis):
-    """Store graph edges from Opus synthesis."""
+    """Store graph edges from Opus synthesis.
+
+    Clears any existing edges for this conversation first to prevent
+    accumulation across reprocessing runs.
+    """
+    deleted = conn.execute(
+        "DELETE FROM graph_edges WHERE source_conversation_id = ?",
+        (conversation_id,),
+    ).rowcount
+    if deleted:
+        logger.info(f"[{conversation_id[:8]}] Cleared {deleted} old graph edges before storing new ones")
+
     now = datetime.now(timezone.utc).isoformat()
     for edge in synthesis.graph_edges:
         conn.execute(

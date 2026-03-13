@@ -2,17 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../api';
 import { layout, colors } from '../styles';
 import PageHeader from '../components/PageHeader';
+import RenamePreview from '../components/RenamePreview';
 
 export default function People() {
   const [graph, setGraph] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [renameContact, setRenameContact] = useState(null);
 
-  useEffect(() => {
+  const loadGraph = () => {
     api.graph()
       .then(setGraph)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { loadGraph(); }, []);
 
   const contacts = graph?.contacts || graph?.nodes || [];
 
@@ -35,8 +39,23 @@ export default function People() {
                 border: `1px solid ${colors.border}`,
                 background: colors.bg,
               }}>
-                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-                  {c.canonical_name || c.display_name || c.id}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                    {c.canonical_name || c.display_name || c.id}
+                  </div>
+                  <button
+                    onClick={() => setRenameContact(c)}
+                    title="Rename contact and propagate to all records"
+                    style={{
+                      background: 'none', border: 'none', color: colors.textDim,
+                      fontSize: 11, cursor: 'pointer', padding: '2px 6px',
+                      borderRadius: 4, flexShrink: 0,
+                    }}
+                    onMouseEnter={e => { e.target.style.color = colors.accent; e.target.style.background = colors.accent + '15'; }}
+                    onMouseLeave={e => { e.target.style.color = colors.textDim; e.target.style.background = 'none'; }}
+                  >
+                    Rename
+                  </button>
                 </div>
                 {c.organization && (
                   <div style={{ fontSize: 12, color: colors.textMuted }}>{c.organization}</div>
@@ -54,6 +73,14 @@ export default function People() {
           </div>
         )}
       </div>
+
+      {renameContact && (
+        <RenamePreview
+          contact={renameContact}
+          onClose={() => setRenameContact(null)}
+          onApplied={() => { setRenameContact(null); loadGraph(); }}
+        />
+      )}
     </div>
   );
 }

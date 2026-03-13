@@ -1002,7 +1002,62 @@ def list_conversation_people(conversation_id: str):
             if sel["link_source"]:
                 people_map[key]["link_sources"].add(sel["link_source"])
 
-        # ── Consolidate: merge unresolved into matching resolved person ──
+        # ── Source 4: graph_edges (person-typed entities) ──
+        # Surface people referenced in graph edges that weren't caught by claims/synthesis
+        PERSON_EDGE_TYPES = {
+            "reports_to", "works_with", "knows", "supports", "opposes",
+            "mentors", "manages", "advises",
+        }
+        ge_rows = conn.execute("""
+            SELECT from_entity, from_type, to_entity, to_type, edge_type
+            FROM graph_edges
+            WHERE source_conversation_id = ?
+        """, (conversation_id,)).fetchall()
+
+        for ge in ge_rows:
+            # Check from_entity
+            if ge["from_type"] == "person" or ge["edge_type"] in PERSON_EDGE_TYPES:
+                name = ge["from_entity"]
+                if name and name.strip():
+                    key = f"unresolved:{name.strip().lower()}"
+                    # Only add if not already captured by another source
+                    # Check both unresolved key and resolved entries
+                    already_known = key in people_map or any(
+                        name.strip().lower() in {n.strip().lower() for n in d["original_names"]}
+                        for d in people_map.values()
+                    )
+                    if not already_known:
+                        people_map[key] = {
+                            "original_names": {name.strip()},
+                            "entity_id": None,
+                            "canonical_name": None,
+                            "is_confirmed": None,
+                            "subject_claim_count": 0,
+                            "roles": {"graph_entity"},
+                            "link_sources": set(),
+                        }
+
+            # Check to_entity
+            if ge["to_type"] == "person" or ge["edge_type"] in PERSON_EDGE_TYPES:
+                name = ge["to_entity"]
+                if name and name.strip():
+                    key = f"unresolved:{name.strip().lower()}"
+                    already_known = key in people_map or any(
+                        name.strip().lower() in {n.strip().lower() for n in d["original_names"]}
+                        for d in people_map.values()
+                    )
+                    if not already_known:
+                        people_map[key] = {
+                            "original_names": {name.strip()},
+                            "entity_id": None,
+                            "canonical_name": None,
+                            "is_confirmed": None,
+                            "subject_claim_count": 0,
+                            "roles": {"graph_entity"},
+                            "link_sources": set(),
+                        }
+
+                # ── Consolidate: merge unresolved into matching resolved person ──
         # If "unresolved:daniel park" exists AND a resolved entity has
         # canonical_name "Daniel Park" (case-insensitive), merge claims into
         # the resolved entry. Display-only — no DB mutation.
@@ -1126,11 +1181,28 @@ def confirm_person(conversation_id: str, request: ConfirmPersonRequest):
             source="confirm_person",
         )
 
+        # Ensure claim_entities rows exist for all claims already linked via subject_entity_id.
+        # The cascade only creates junction rows for NEW links; claims that were linked
+        # (e.g., by manual fix or prior cascade) but lack claim_entities rows need backfill.
+        from sauron.api.corrections import sync_claim_entities_subject
+        linked_claims = conn.execute("""
+            SELECT ec.id FROM event_claims ec
+            WHERE ec.conversation_id = ? AND ec.subject_entity_id = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM claim_entities ce
+                  WHERE ce.claim_id = ec.id AND ce.entity_id = ?
+              )
+        """, (conversation_id, request.entity_id, request.entity_id)).fetchall()
+        for lc in linked_claims:
+            sync_claim_entities_subject(
+                conn, lc["id"], request.entity_id, canonical_name, "confirm_person"
+            )
+
         # Upgrade link_source from auto -> user for claim_entities in this conversation
         conn.execute("""
             UPDATE claim_entities SET link_source = 'user'
             WHERE entity_id = ?
-              AND link_source IN ('auto_synthesis', 'resolver', 'model')
+              AND link_source IN ('auto_synthesis', 'resolver', 'model', 'confirm_person', 'cascade')
               AND claim_id IN (
                   SELECT id FROM event_claims WHERE conversation_id = ?
               )

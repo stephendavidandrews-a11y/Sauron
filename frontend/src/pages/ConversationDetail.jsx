@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
+import TextReplaceCascade from '../components/TextReplaceCascade';
 import { fetchRoutingSummary, fetchPendingRoutes, fetchGraphEdges, confirmGraphEdge, dismissGraphEdge, updateGraphEdge } from '../api';
 
 export const C = {
@@ -95,6 +96,7 @@ export default function ConversationDetail() {
   const [contactsList, setContactsList] = useState([]);
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [textReplaceTarget, setTextReplaceTarget] = useState(null);
   const [peopleStatus, setPeopleStatus] = useState(null);
   const [claims, setClaims] = useState([]);
 
@@ -307,8 +309,25 @@ export default function ConversationDetail() {
               {reprocessing ? 'Processing...' : 'Reprocess'}
             </button>
           )}
+          <button onClick={() => setTextReplaceTarget({ findText: '', replaceWith: '' })}
+            style={{ padding: '8px 16px', background: '#6b7280', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
+            Fix Text
+          </button>
         </div>
       </div>
+
+      {/* Text replace cascade (top-level, triggered by Fix Text button or people review) */}
+      {textReplaceTarget && (
+        <div style={{ margin: '0 0 16px 0' }}>
+          <TextReplaceCascade
+            conversationId={id}
+            defaultFindText={textReplaceTarget.findText}
+            defaultReplaceWith={textReplaceTarget.replaceWith}
+            onComplete={() => { setTextReplaceTarget(null); reload(); }}
+            onDismiss={() => setTextReplaceTarget(null)}
+          />
+        </div>
+      )}
 
       {/* Metadata chips */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '12px 0 20px' }}>
@@ -336,7 +355,7 @@ export default function ConversationDetail() {
       )}
 
       {/* Layer 1: People resolution */}
-      <PeopleReviewBanner key={`people-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} onPeopleLoaded={setPeopleStatus} pendingEntities={pendingEntities} />
+      <PeopleReviewBanner key={`people-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} onPeopleLoaded={setPeopleStatus} pendingEntities={pendingEntities} textReplaceTarget={textReplaceTarget} setTextReplaceTarget={setTextReplaceTarget} />
 
       {/* Layer 2: Relational references (unchanged) */}
       <RelationalReferencesBanner key={`rel-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} />
@@ -2453,6 +2472,7 @@ export function RelationalReferencesBanner({
 export function PeopleReviewBanner({
   conversationId, contacts, onResolved, onPeopleLoaded,
   initialPeople, pendingEntities: pendingEntitiesProp,
+  textReplaceTarget, setTextReplaceTarget,
   loadPeopleFn = api.conversationPeople,
   confirmPersonFn = api.confirmPerson,
   skipPersonFn = api.skipPerson,
@@ -2566,6 +2586,18 @@ export function PeopleReviewBanner({
       setLinkResults([]);
       fetchPeople();
       if (onResolved) onResolved();
+      // Trigger text replace cascade if name mismatch detected
+      const linkedContact = linkResults.find(c => c.id === targetId) || contacts.find(c => c.id === targetId);
+      const newName = linkedContact ? (linkedContact.canonical_name || '').trim() : '';
+      if (newName) {
+        // Check all_names for any name that differs from the canonical name
+        // (original_name may already be the canonical name due to alphabetic sorting)
+        const allNames = person.all_names || [person.original_name];
+        const mismatchedName = allNames.find(n => n && n.trim().toLowerCase() !== newName.toLowerCase());
+        if (mismatchedName) {
+          setTextReplaceTarget({ findText: mismatchedName.trim(), replaceWith: newName });
+        }
+      }
     } catch (e) { console.error('Link failed', e); }
     setActionLoading(null);
   };
@@ -2645,6 +2677,15 @@ export function PeopleReviewBanner({
       setActionError(null);
       fetchPeople();
       if (onResolved) onResolved();
+      // Trigger text replace cascade if name mismatch detected
+      const newName2 = (editForm.name || '').trim();
+      if (newName2) {
+        const allNames2 = person.all_names || [person.original_name];
+        const mismatchedName2 = allNames2.find(n => n && n.trim().toLowerCase() !== newName2.toLowerCase());
+        if (mismatchedName2) {
+          setTextReplaceTarget({ findText: mismatchedName2.trim(), replaceWith: newName2 });
+        }
+      }
     } catch (e) {
       const msg = e.message || 'Create contact failed';
       if (msg.includes('409')) {
@@ -3006,6 +3047,17 @@ export function PeopleReviewBanner({
       {/* Skipped people */}
       {skippedPeople.map(renderPersonRow)}
 
+      {/* Text replace cascade */}
+      {textReplaceTarget && (
+          <TextReplaceCascade
+            conversationId={conversationId}
+            defaultFindText={textReplaceTarget.findText}
+            defaultReplaceWith={textReplaceTarget.replaceWith}
+            onComplete={() => { setTextReplaceTarget(null); if (onResolved) onResolved(); }}
+            onDismiss={() => setTextReplaceTarget(null)}
+          />
+        )}
+
       {/* Self at the bottom */}
       {selfPeople.map(person => (
         <div key="self" style={{ padding: '4px 12px', fontSize: 12, color: C.textDim }}>
@@ -3201,7 +3253,7 @@ export function GraphEdgeReviewBanner({ conversationId, refreshKey }) {
         background: C.card,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14 }}>{'\U0001F517'}</span>
+          <span style={{ fontSize: 14 }}>{'\u{1F517}'}</span>
           <span style={{ color: C.textDim, fontWeight: 500, fontSize: 13 }}>
             Graph Relationships {'\u2014'} No inferred edges for this conversation
           </span>
@@ -3218,7 +3270,7 @@ export function GraphEdgeReviewBanner({ conversationId, refreshKey }) {
         background: pending.length > 0 ? C.warning + '08' : C.success + '08',
       }} onClick={() => setExpanded(true)}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14 }}>{'\U0001F517'}</span>
+          <span style={{ fontSize: 14 }}>{'\u{1F517}'}</span>
           <span style={{
             color: pending.length > 0 ? C.warning : C.success,
             fontWeight: 600, fontSize: 13,
@@ -3240,7 +3292,7 @@ export function GraphEdgeReviewBanner({ conversationId, refreshKey }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, cursor: 'pointer' }}
         onClick={() => setExpanded(false)}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14 }}>{'\U0001F517'}</span>
+          <span style={{ fontSize: 14 }}>{'\u{1F517}'}</span>
           <span style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>
             Graph Relationships ({edges.length})
           </span>

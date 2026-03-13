@@ -92,6 +92,47 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  previewRename: (contactId, newName, oldNameOverride) =>
+    fetchJSON(`/graph/contacts/${contactId}/preview-rename`, {
+      method: 'POST',
+      body: JSON.stringify({
+        new_name: newName,
+        old_name_override: oldNameOverride || undefined,
+      }),
+    }),
+
+  applyRename: (contactId, newName, changeIds, oldNameOverride) =>
+    fetchJSON(`/graph/contacts/${contactId}/apply-rename`, {
+      method: 'POST',
+      body: JSON.stringify({
+        new_name: newName,
+        change_ids: changeIds,
+        old_name_override: oldNameOverride || undefined,
+      }),
+    }),
+
+  previewTextReplace: (conversationId, findText, replaceWith) =>
+    fetchJSON('/text-replace/preview', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        find_text: findText,
+        replace_with: replaceWith,
+      }),
+    }),
+
+  applyTextReplace: (conversationId, findText, replaceWith, changeIds, editedChanges) =>
+    fetchJSON('/text-replace/apply', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        find_text: findText,
+        replace_with: replaceWith,
+        change_ids: changeIds,
+        edited_changes: editedChanges || [],
+      }),
+    }),
+
   // Performance
   performance: () => fetchJSON('/performance'),
 

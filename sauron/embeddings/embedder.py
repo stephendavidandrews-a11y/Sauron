@@ -471,3 +471,44 @@ def embed_all_beliefs() -> int:
         conn.close()
 
     return embedded_count
+
+
+def re_embed_items(items: list[dict]) -> int:
+    """Re-embed specific items after text changes (e.g., contact rename).
+
+    Each item: {source_type, source_id, conversation_id, new_text, contact_id}
+    Deletes old embedding and inserts new one. Returns count re-embedded.
+    """
+    from sauron.db.connection import get_connection
+    conn = get_connection()
+    count = 0
+    try:
+        for item in items:
+            conn.execute(
+                "DELETE FROM embeddings WHERE source_type = ? AND source_id = ?",
+                (item["source_type"], item["source_id"]),
+            )
+            blob = embed_text(item["new_text"])
+            conn.execute(
+                """INSERT INTO embeddings
+                    (conversation_id, source_type, source_id, text_content,
+                     embedding, contact_id)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    item.get("conversation_id"),
+                    item["source_type"],
+                    item["source_id"],
+                    item["new_text"],
+                    blob,
+                    item.get("contact_id"),
+                ),
+            )
+            count += 1
+        conn.commit()
+        logger.info("Re-embedded %d items", count)
+    except Exception:
+        logger.exception("Re-embed failed")
+        conn.rollback()
+    finally:
+        conn.close()
+    return count

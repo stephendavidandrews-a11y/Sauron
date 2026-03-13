@@ -7,6 +7,21 @@ import json
 import logging
 import uuid
 
+
+def _is_transcription_error(old_name: str, new_name: str) -> bool:
+    """Check if a name change represents a genuine transcription error.
+
+    Returns True only when old and new names share NO common words.
+    Examples:
+      "Wieden" -> "Wyden"  => True  (no common words, Whisper misheard)
+      "Lee" -> "Mike Lee"  => False (Lee is in both, just incomplete)
+      "Daniel" -> "Daniel Park" => False (Daniel is in both)
+    """
+    old_words = {w.lower() for w in old_name.strip().split()}
+    new_words = {w.lower() for w in new_name.strip().split()}
+    return len(old_words & new_words) == 0
+
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
@@ -545,6 +560,26 @@ def link_provisional_to_existing(contact_id: str, request: ProvisionalLinkReques
              request.user_feedback),
         )
 
+        # 5a-extra. Learn alias + log name_transcription if names differ
+        if prov["canonical_name"].strip().lower() != target_dict["canonical_name"].strip().lower():
+            try:
+                from sauron.extraction.alias_learner import learn_alias
+                learn_alias(conn, request.target_contact_id, prov["canonical_name"].strip(), target_dict["canonical_name"])
+                logger.info("Learned alias (link): '%s' -> '%s'", prov["canonical_name"], target_dict["canonical_name"])
+            except Exception:
+                logger.exception("Alias learning in link_provisional failed (non-fatal)")
+            if _is_transcription_error(prov["canonical_name"].strip(), target_dict["canonical_name"]):
+                try:
+                    conn.execute(
+                        """INSERT INTO correction_events
+                           (id, conversation_id, error_type, old_value, new_value, correction_source)
+                           VALUES (?, ?, 'name_transcription', ?, ?, 'link_provisional')""",
+                        (str(uuid.uuid4()), prov.get("source_conversation_id") or "",
+                         prov["canonical_name"].strip(), target_dict["canonical_name"]),
+                    )
+                except Exception:
+                    logger.exception("Correction event logging in link_provisional failed (non-fatal)")
+
         # 5b. Run entity confirmation cascade (text rewriting, episode titles, synthesis links, etc.)
         try:
             from sauron.extraction.cascade import cascade_entity_confirmation
@@ -676,6 +711,27 @@ def confirm_provisional_contact(contact_id: str, request: ProvisionalConfirmRequ
             logger.info(f"Confirm provisional cascade: {_cascade_stats}")
         except Exception:
             logger.exception("Confirm provisional cascade failed (non-fatal)")
+
+        # Learn alias and log correction if name changed
+        old_name = prov["canonical_name"]
+        if request.canonical_name and old_name.strip().lower() != request.canonical_name.strip().lower():
+            try:
+                from sauron.extraction.alias_learner import learn_alias
+                learn_alias(conn, contact_id, old_name.strip(), request.canonical_name.strip())
+                logger.info("Learned alias (confirm): '%s' -> '%s'", old_name, request.canonical_name)
+            except Exception:
+                logger.exception("Alias learning failed (non-fatal)")
+            if _is_transcription_error(old_name.strip(), request.canonical_name.strip()):
+                try:
+                    conn.execute(
+                        """INSERT INTO correction_events
+                           (id, conversation_id, error_type, old_value, new_value, correction_source)
+                           VALUES (?, ?, 'name_transcription', ?, ?, 'confirm_provisional')""",
+                        (str(uuid.uuid4()), prov.get("source_conversation_id") or "",
+                         old_name.strip(), request.canonical_name.strip()),
+                    )
+                except Exception:
+                    logger.exception("Correction event logging failed (non-fatal)")
 
         # Optionally push to Networking App
         if request.push_to_networking_app:
@@ -862,6 +918,29 @@ def create_contact(request: CreateContactRequest):
             )
         except Exception:
             logger.exception("create_contact cascade failed (non-fatal)")
+
+        # Learn alias and log correction if original name differs from canonical
+        if request.original_name and request.original_name.strip().lower() != name.lower():
+            orig = request.original_name.strip()
+            try:
+                from sauron.extraction.alias_learner import learn_alias
+                learn_alias(conn, contact_id, orig, name)
+                logger.info(f"Learned alias: '{orig}' -> '{name}'")
+            except Exception:
+                logger.exception("Alias learning failed (non-fatal)")
+            # Log correction event only for genuine transcription errors (no common words)
+            if _is_transcription_error(orig, name):
+                try:
+                    conn.execute(
+                        """INSERT INTO correction_events
+                           (id, conversation_id, error_type, old_value, new_value, correction_source)
+                           VALUES (?, ?, 'name_transcription', ?, ?, 'create_contact')""",
+                        (str(uuid.uuid4()), request.source_conversation_id or '',
+                         orig, name),
+                    )
+                    logger.info(f"Logged name_transcription correction: '{orig}' -> '{name}'")
+                except Exception:
+                    logger.exception("Correction event logging failed (non-fatal)")
 
         # Absorb matching provisional contact if one exists
         if request.original_name:

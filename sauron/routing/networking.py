@@ -1374,7 +1374,8 @@ def _route_interaction_participants(
                FROM transcripts t
                JOIN voice_match_log vml ON vml.conversation_id = t.conversation_id
                    AND vml.speaker_label = t.speaker_label
-               JOIN unified_contacts uc ON uc.id = vml.matched_contact_id
+               JOIN voice_profiles vp ON vp.id = vml.matched_profile_id
+               JOIN unified_contacts uc ON uc.id = vp.contact_id
                WHERE t.conversation_id = ?
                  AND uc.networking_app_contact_id IS NOT NULL""",
             (conversation_id,),

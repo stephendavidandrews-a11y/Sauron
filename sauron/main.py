@@ -196,6 +196,8 @@ from sauron.api.routing_api import router as routing_router
 from sauron.api.routing_api import conv_routing_router
 from sauron.api.provisional_orgs_api import router as provisional_orgs_router
 from sauron.api.graph_edges_api import router as graph_edges_router
+from sauron.api.rename import router as rename_router
+from sauron.api.text_replace import router as text_replace_router
 
 app.include_router(conversations_router, prefix="/api")
 app.include_router(profiles_router, prefix="/api")
@@ -213,6 +215,8 @@ app.include_router(routing_router, prefix="/api")
 app.include_router(conv_routing_router, prefix="/api")
 app.include_router(provisional_orgs_router, prefix="/api")
 app.include_router(graph_edges_router, prefix="/api")
+app.include_router(rename_router, prefix="/api")
+app.include_router(text_replace_router, prefix="/api")
 
 
 @app.get("/api/health")

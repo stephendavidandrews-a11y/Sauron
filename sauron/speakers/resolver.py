@@ -25,6 +25,7 @@ def resolve_speakers(
     conversation_id: str,
     speaker_embeddings: dict[str, np.ndarray],
     calendar_attendees: list[dict] | None = None,
+    conn: "sqlite3.Connection | None" = None,
 ) -> dict[str, str | None]:
     """Resolve speaker labels to contact IDs.
 
@@ -37,7 +38,9 @@ def resolve_speakers(
         Dict of speaker_label -> contact_id (or None if unresolved).
     """
     resolved: dict[str, str | None] = {}
-    conn = get_connection()
+    owns_conn = conn is None
+    if owns_conn:
+        conn = get_connection()
 
     try:
         # Step 1: Identify anchor speaker (Stephen)
@@ -105,9 +108,11 @@ def resolve_speakers(
                 _log_match(conn, conversation_id, label, None,
                            0.0, "unmatched")
 
-        conn.commit()
+        if owns_conn:
+            conn.commit()
     finally:
-        conn.close()
+        if owns_conn:
+            conn.close()
 
     return resolved
 
@@ -134,6 +139,16 @@ def _match_voiceprint(conn, embedding: np.ndarray) -> tuple[str, str, float] | N
 
     for profile in profiles:
         stored_emb = np.frombuffer(profile["mean_embedding"], dtype=np.float32)
+        emb_norm = np.linalg.norm(stored_emb)
+        if np.isnan(emb_norm) or np.isinf(emb_norm) or emb_norm == 0:
+            logger.error(
+                "CORRUPTED voice profile %s (contact=%s) — "
+                "mean_embedding norm=%.4f. Skipping. "
+                "Rebuild this profile from voice_samples.",
+                profile["id"][:8], profile["contact_id"][:8] if profile["contact_id"] else "None",
+                emb_norm if not np.isnan(emb_norm) else float("nan"),
+            )
+            continue
         sim = _cosine_similarity(embedding, stored_emb)
         if sim > best_sim:
             best_sim = sim
@@ -150,7 +165,17 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     norm_b = np.linalg.norm(b)
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    return float(np.dot(a, b) / (norm_a * norm_b))
+    result = float(np.dot(a, b) / (norm_a * norm_b))
+    # Guard against NaN from corrupted embeddings
+    if np.isnan(result) or np.isinf(result):
+        logger.warning(
+            "CORRUPTED EMBEDDING detected in cosine_similarity — "
+            "result is %s. Norms: a=%.4f, b=%.4f. "
+            "A voice profile may need rebuilding.",
+            result, norm_a, norm_b
+        )
+        return 0.0
+    return result
 
 
 def _log_match(conn, conversation_id, speaker_label, contact_id, similarity, method):

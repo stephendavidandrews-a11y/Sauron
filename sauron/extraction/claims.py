@@ -141,6 +141,13 @@ RULES — you MUST follow all of these:
    participant roster, use whatever name is given in the transcript.
    These will be flagged as provisional contacts downstream.
 
+7. subject_name is the person PERFORMING THE ACTION or being described,
+   NOT the person who reported or said it. The speaker field captures
+   who said it. Example: if Daniel Park says "Wyden plans to introduce
+   the bill Thursday", the subject_name is "Wyden" (the person acting),
+   NOT "Daniel Park" (the speaker). Do NOT create duplicate claims about
+   the same fact attributed to different subjects.
+
 ═══════════════════════════════════════════════════════════════
 STAGE 3: FILTER
 ═══════════════════════════════════════════════════════════════
@@ -200,6 +207,11 @@ Output ONLY valid JSON — no preamble, no commentary, no markdown fences:
       "value": "The factual detail",
       "source_quote": "Exact words"
     }
+  ],
+  "people_mentioned": [
+    "Full Name of every person who performs an action, is described,
+     or is referenced by name in the claims, including third parties
+     mentioned in passing. Use full names where known."
   ],
   "new_contacts_mentioned": [
     {
@@ -567,12 +579,12 @@ def extract_claims(
         with concurrent.futures.ThreadPoolExecutor() as pool:
             future = pool.submit(
                 asyncio.run,
-                _extract_claims_async(transcript_text, episodes, amendment_context, speaker_map),
+                _extract_claims_async(transcript_text, episodes, amendment_context, speaker_map, conversation_id),
             )
             return future.result()
     else:
         return asyncio.run(
-            _extract_claims_async(transcript_text, episodes, amendment_context, speaker_map)
+            _extract_claims_async(transcript_text, episodes, amendment_context, speaker_map, conversation_id)
         )
 
 
@@ -581,6 +593,7 @@ async def _extract_claims_async(
     episodes: list[Episode],
     amendment_context: str = "",
     speaker_map: dict | None = None,
+    conversation_id: str = "",
 ) -> tuple[ClaimsResult, dict]:
     """Async implementation of claims extraction with concurrent batches."""
     client = anthropic.AsyncAnthropic(timeout=300.0)
@@ -702,6 +715,7 @@ async def _extract_claims_async(
     # Merge results in batch order
     all_claims = []
     all_memory_writes = []
+    all_people_mentioned = set()
     all_new_contacts_map = {}
     _seen_claim_hashes = set()
 
@@ -752,6 +766,7 @@ async def _extract_claims_async(
             all_claims.append(claim)
 
         all_memory_writes.extend(result.memory_writes)
+        all_people_mentioned.update(p.strip() for p in result.people_mentioned if p.strip())
         for mention in result.new_contacts_mentioned:
             if isinstance(mention, str):
                 name = mention.strip()
@@ -766,6 +781,7 @@ async def _extract_claims_async(
     merged = ClaimsResult(
         claims=all_claims,
         memory_writes=all_memory_writes,
+        people_mentioned=sorted(all_people_mentioned),
         new_contacts_mentioned=list(all_new_contacts_map.values()),
     )
 

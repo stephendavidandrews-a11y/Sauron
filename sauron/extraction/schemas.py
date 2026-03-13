@@ -59,7 +59,7 @@ class Claim(BaseModel):
     )
     claim_text: str = Field(description="Natural language claim")
     subject_entity_id: str | None = None
-    subject_name: str = ""
+    subject_name: str | None = ""
     target_entity: str | None = None
     speaker: str | None = None
     modality: str = Field(
@@ -75,7 +75,7 @@ class Claim(BaseModel):
         default="stable_fact",
         description="stable_fact | soft_inference | transient_observation"
     )
-    evidence_quote: str = ""
+    evidence_quote: str | None = ""
     evidence_start: float | None = None
     evidence_end: float | None = None
     review_after: str | None = None
@@ -103,13 +103,13 @@ class MemoryWrite(BaseModel):
     """A structured memory update for a contact or entity."""
     entity_type: str = Field(description="person | topic | organization | self")
     entity_id: str | None = None
-    entity_name: str = ""
+    entity_name: str | None = ""
     field: str = Field(
         description="address | kids | partnerName | dietaryNotes | city | birthday | "
                     "interest | activity | lifeEvent | emotionalContext | etc"
     )
     value: str
-    source_quote: str = ""
+    source_quote: str | None = ""
 
 
 class NewContactMention(BaseModel):
@@ -123,14 +123,15 @@ class NewContactMention(BaseModel):
     connectionTo: str | None = None
     mentionedBy: str | None = None
     confidence: float | None = None
-    source_claim_id: str = ""       # Cat4 Step G: ties back to originating claim
-    introduced_by: str = ""         # Cat4 Step G: provenance — who introduced this person
+    source_claim_id: str | None = None  # Cat4 Step G: ties back to originating claim
+    introduced_by: str | None = None  # Cat4 Step G: provenance — who introduced this person
 
 
 class ClaimsResult(BaseModel):
     """Sonnet 4.6 output — atomic claims with evidence spans."""
     claims: list[Claim] = Field(default_factory=list)
     memory_writes: list[MemoryWrite] = Field(default_factory=list)
+    people_mentioned: list[str] = Field(default_factory=list)
     new_contacts_mentioned: list[NewContactMention | str] = Field(default_factory=list)
 
 
@@ -152,7 +153,7 @@ class BeliefUpdate(BaseModel):
     """An update to the belief layer, derived from claims."""
     entity_type: str = Field(description="person | topic | organization | relationship | self")
     entity_id: str | None = None
-    entity_name: str = ""
+    entity_name: str | None = ""
     belief_key: str = Field(description="Short identifier for dedup/matching")
     belief_summary: str
     status: str = Field(
@@ -187,7 +188,7 @@ class PolicyPosition(BaseModel):
     topic: str
     position: str
     strength: float = Field(ge=0, le=1)
-    notes: str = ""
+    notes: str | None = ""
 
 
 class Commitment(BaseModel):
@@ -221,12 +222,12 @@ class CalendarEvent(BaseModel):
     title: str
     suggested_date: str | None = None
     attendees: list[str] = Field(default_factory=list)
-    original_words: str = ""        # Cat4 Step F: verbatim scheduling language
-    start_time: str = ""            # Cat4 Step F: ISO datetime if extractable
-    end_time: str = ""              # Cat4 Step F: ISO datetime if extractable
-    location: str = ""              # Cat4 Step F: meeting location if mentioned
+    original_words: str | None = ""        # Cat4 Step F: verbatim scheduling language
+    start_time: str | None = ""            # Cat4 Step F: ISO datetime if extractable
+    end_time: str | None = ""              # Cat4 Step F: ISO datetime if extractable
+    location: str | None = ""              # Cat4 Step F: meeting location if mentioned
     is_placeholder: bool = False    # Cat4 Step F: True if time is inferred
-    source_claim_id: str = ""       # Cat4 Step F: traceable claim
+    source_claim_id: str | None = None       # Cat4 Step F: traceable claim
 
 
 class FollowUp(BaseModel):
@@ -242,8 +243,8 @@ class StatusChange(BaseModel):
     details: str
     effective_date: str | None = None
     source_claim_id: str | None = None
-    from_state: str = ""    # Cat4 Step C: e.g. "VP at Goldman"
-    to_state: str = ""      # Cat4 Step C: e.g. "MD at Morgan Stanley"
+    from_state: str | None = ""    # Cat4 Step C: e.g. "VP at Goldman"
+    to_state: str | None = ""      # Cat4 Step C: e.g. "MD at Morgan Stanley"
 
 
 class OrgIntelligence(BaseModel):
@@ -264,8 +265,8 @@ class OrgIntelligence(BaseModel):
     relationship_type: str | None = None  # for org_relationship: acquisition | partnership | subsidiary | competitor | regulator_of
     mentioned_by: str | None = None  # contact who mentioned it
     source_claim_id: str | None = None
-    org_category: str = ""      # Cat4 Step H: industry category if discernible
-    org_size: str = ""          # Cat4 Step H: startup, mid-market, enterprise, government_agency
+    org_category: str | None = ""      # Cat4 Step H: industry category if discernible
+    org_size: str | None = ""          # Cat4 Step H: startup, mid-market, enterprise, government_agency
 
 
 class ProvenanceObservation(BaseModel):
@@ -273,7 +274,7 @@ class ProvenanceObservation(BaseModel):
     contact_name: str
     introduced_by: str | None = None       # name of the person who made the intro
     discovered_via: str | None = None      # "conference", "referral", "cold_outreach", "mutual_friend"
-    context: str = ""                      # brief description of how they met/connected
+    context: str | None = ""                      # brief description of how they met/connected
     source_claim_id: str | None = None
 
 
@@ -304,37 +305,37 @@ class AffiliationMention(BaseModel):
 
 class ReferencedResource(BaseModel):
     """A resource (book, article, tool, website, framework) mentioned in conversation."""
-    resource_type: str = ""          # book, article, tool, website, framework, podcast, course, etc.
-    title: str = ""
-    author: str = ""
-    url: str = ""
-    description: str = ""
-    mentioned_by: str = ""           # speaker who mentioned it
-    context: str = ""                # why it was mentioned
-    contact_name: str = ""           # person it's associated with (for routing)
-    source_claim_id: str = ""
+    resource_type: str | None = ""          # book, article, tool, website, framework, podcast, course, etc.
+    title: str | None = ""
+    author: str | None = ""
+    url: str | None = ""
+    description: str | None = ""
+    mentioned_by: str | None = ""           # speaker who mentioned it
+    context: str | None = ""                # why it was mentioned
+    contact_name: str | None = ""           # person it's associated with (for routing)
+    source_claim_id: str | None = None
 
 
 class Ask(BaseModel):
     """An explicit or soft ask made during conversation."""
-    ask_type: str = ""               # direct_ask, soft_ask, implied_need, favor, introduction_request
-    description: str = ""
-    original_words: str = ""
-    asked_by: str = ""               # speaker
-    asked_of: str = ""               # who is being asked (me, them, specific person)
-    contact_name: str = ""           # resolved contact name for routing
-    urgency: str = ""                # low, medium, high
-    status: str = ""                 # open, fulfilled, declined, deferred
-    source_claim_id: str = ""
+    ask_type: str | None = ""               # direct_ask, soft_ask, implied_need, favor, introduction_request
+    description: str | None = ""
+    original_words: str | None = ""
+    asked_by: str | None = ""               # speaker
+    asked_of: str | None = ""               # who is being asked (me, them, specific person)
+    contact_name: str | None = ""           # resolved contact name for routing
+    urgency: str | None = ""                # low, medium, high
+    status: str | None = ""                 # open, fulfilled, declined, deferred
+    source_claim_id: str | None = None
 
 
 class LifeEvent(BaseModel):
     """A significant personal life event mentioned in conversation."""
-    event_type: str = ""             # marriage, birth, death, graduation, move, retirement, health, milestone
-    description: str = ""
-    contact_name: str = ""           # person the event is about
-    approximate_date: str = ""       # when it happened/will happen
-    source_claim_id: str = ""
+    event_type: str | None = ""             # marriage, birth, death, graduation, move, retirement, health, milestone
+    description: str | None = ""
+    contact_name: str | None = ""           # person the event is about
+    approximate_date: str | None = ""       # when it happened/will happen
+    source_claim_id: str | None = None
 
 
 class SynthesisResult(BaseModel):

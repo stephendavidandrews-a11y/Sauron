@@ -1552,12 +1552,24 @@ def _promote_voice_sample(conn, conversation_id: str, speaker_label: str, contac
     if existing_profile:
         profile = dict(existing_profile)
         profile_id = profile["id"]
-        old_mean = np.frombuffer(profile["mean_embedding"], dtype=np.float64)
+        old_mean = np.frombuffer(profile["mean_embedding"], dtype=np.float32)
         old_count = profile["sample_count"] or 0
 
         # Incremental mean: new_mean = (old_mean * count + new_sample) / (count + 1)
         new_count = old_count + 1
         new_mean = (old_mean * old_count + embedding) / new_count
+        # Validate result before storage
+        if np.any(np.isnan(new_mean)) or np.any(np.isinf(new_mean)):
+            logger.error(
+                "VOICE PROFILE CORRUPTION PREVENTED: contact %s — "
+                "mean embedding would contain NaN/Inf after adding sample. "
+                "old_mean dtype=%s shape=%s, embedding dtype=%s shape=%s. "
+                "Profile NOT updated. Manual rebuild needed.",
+                contact_id[:8], old_mean.dtype, old_mean.shape,
+                embedding.dtype, embedding.shape,
+            )
+            return
+        new_mean = new_mean.astype(np.float32)
         new_confidence = 1.0 - (1.0 / (new_count + 1))
 
         conn.execute(

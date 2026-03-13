@@ -9,6 +9,23 @@ from sauron.db.connection import get_connection
 
 logger = logging.getLogger(__name__)
 
+def _validate_embedding(emb: np.ndarray, context: str = "") -> np.ndarray:
+    """Validate an embedding before storage. Raises ValueError if corrupted."""
+    if emb is None or emb.size == 0:
+        raise ValueError(f"Empty embedding {context}")
+    if np.any(np.isnan(emb)):
+        raise ValueError(f"NaN in embedding {context}")
+    if np.any(np.isinf(emb)):
+        raise ValueError(f"Inf in embedding {context}")
+    norm = np.linalg.norm(emb)
+    if norm == 0:
+        raise ValueError(f"Zero-norm embedding {context}")
+    if norm > 100:
+        raise ValueError(f"Abnormal norm ({norm:.2f}) in embedding {context}")
+    # Ensure float32 for consistent storage
+    return emb.astype(np.float32)
+
+
 
 def enroll_speaker(
     contact_id: str,
@@ -27,6 +44,7 @@ def enroll_speaker(
         profile_id = str(uuid.uuid4())
         sample_id = str(uuid.uuid4())
 
+        embedding = _validate_embedding(embedding, f"enroll {display_name}")
         conn.execute(
             """INSERT INTO voice_profiles
                (id, contact_id, display_name, mean_embedding, sample_count, confidence_score)
@@ -83,7 +101,7 @@ def add_sample(
         ).fetchall()
 
         all_embs = [np.frombuffer(s["embedding"], dtype=np.float32) for s in samples]
-        mean_emb = np.mean(all_embs, axis=0)
+        mean_emb = _validate_embedding(np.mean(all_embs, axis=0), f"add_sample {profile_id[:8]}")
 
         conn.execute(
             """UPDATE voice_profiles SET
