@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize database
     init_db()
-    logger.info("Database initialized")
+    logger.info("[MIGRATION] Database initialized + migrations verified")
 
     # Start file watcher
     _watcher = InboxWatcher(on_new_file=_on_new_file)

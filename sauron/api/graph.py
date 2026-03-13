@@ -74,7 +74,8 @@ def _replay_pending_object_routes(entity_id: str, networking_app_contact_id: str
     this replays individual object-level holds from pending_object_routes.
     """
     import json as _json
-    from sauron.routing.networking import _api_call, NETWORKING_APP_URL
+    from sauron.routing.lanes.core import _api_call
+    from sauron.config import NETWORKING_APP_URL
 
     pending = conn.execute(
         """SELECT id, conversation_id, route_type, payload

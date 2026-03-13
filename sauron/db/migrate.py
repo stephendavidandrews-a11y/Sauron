@@ -307,10 +307,11 @@ def run_migration(db_path: Path = DB_PATH) -> None:
     Safe to call repeatedly — every operation checks before acting.
     """
     if not db_path.exists():
-        logger.error(f"Database not found at {db_path}. Run init_db() first.")
+        logger.error("[MIGRATION] Database not found at %s. Run init_db() first.", db_path)
         return
 
-    conn = sqlite3.connect(str(db_path))
+    logger.info("[MIGRATION] Starting migration check on %s", db_path)
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
 
@@ -397,8 +398,11 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         # -- Step 23: v23 Review UI pass --
         _run_v23_review_ui_pass(conn)
 
+        # -- Step 24: Fix routing_summaries types --
+        _run_v24_fix_routing_summaries_types(conn)
+
         conn.commit()
-        logger.info("Migration complete.")
+        logger.info("[MIGRATION] All migrations complete.")
 
     except Exception:
         conn.rollback()
@@ -766,3 +770,56 @@ def _run_v23_review_ui_pass(conn):
     else:
         logger.info("  v23 columns already present")
     conn.commit()
+
+
+def _run_v24_fix_routing_summaries_types(conn):
+    """v24: Fix routing_summaries column types (conversation_id INTEGER -> TEXT, id INTEGER -> TEXT)."""
+    # Check if fix is needed: see if conversation_id column type is INTEGER
+    cursor = conn.execute("PRAGMA table_info(routing_summaries)")
+    columns = {row[1]: row[2] for row in cursor.fetchall()}
+
+    if columns.get("conversation_id", "").upper() == "INTEGER":
+        logger.info("[MIGRATION] Running v24: fixing routing_summaries column types...")
+
+        # Recreate table with correct types
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS routing_summaries_v24 (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                routing_attempt_id TEXT NOT NULL,
+                trigger_type TEXT NOT NULL,
+                final_state TEXT NOT NULL,
+                core_lanes TEXT NOT NULL,
+                secondary_lanes TEXT NOT NULL,
+                pending_entities TEXT,
+                warning_count INTEGER DEFAULT 0,
+                error_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+            )
+        """)
+
+        # Copy existing data, casting types
+        conn.execute("""
+            INSERT OR IGNORE INTO routing_summaries_v24
+                (id, conversation_id, routing_attempt_id, trigger_type, final_state,
+                 core_lanes, secondary_lanes, pending_entities,
+                 warning_count, error_count, created_at)
+            SELECT CAST(id AS TEXT), CAST(conversation_id AS TEXT),
+                   routing_attempt_id, trigger_type, final_state,
+                   core_lanes, secondary_lanes, pending_entities,
+                   warning_count, error_count, created_at
+            FROM routing_summaries
+        """)
+
+        conn.execute("DROP TABLE routing_summaries")
+        conn.execute("ALTER TABLE routing_summaries_v24 RENAME TO routing_summaries")
+
+        # Recreate indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rs_conversation ON routing_summaries(conversation_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_rs_state ON routing_summaries(final_state)")
+
+        conn.commit()
+        logger.info("[MIGRATION] v24: routing_summaries types fixed (conversation_id -> TEXT, id -> TEXT)")
+    else:
+        logger.info("[MIGRATION] v24: routing_summaries types already correct")

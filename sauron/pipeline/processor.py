@@ -1549,6 +1549,9 @@ def _link_meeting_intentions(conn, conversation_id, speaker_map, extraction_resu
         logger.exception("Intention linking failed (non-fatal)")
 
 
+# DEAD CODE: _run_routing() is never called. Routing fires only via
+# mark_reviewed() in review_actions.py -> route_extraction() in router.py.
+# Retained temporarily for reference; safe to delete in a future cleanup.
 def _run_routing(conversation_id: str, extraction: dict):
     """Route extraction results to downstream apps."""
     try:
