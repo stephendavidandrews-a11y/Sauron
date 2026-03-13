@@ -311,6 +311,102 @@ def _execute_routing(
             networking_app_contact_id, sel_conn,
         )
 
+    # 1C. Contact Status Advance (secondary — non-fatal)
+    #     After a successful interaction, advance the contact's status in the
+    #     Networking App based on sentiment and relationship delta.
+    if _created_interaction_id and networking_app_contact_id:
+        try:
+            _sentiment = interaction_payload.get("sentiment", "neutral")
+            _rel_delta = interaction_payload.get("relationshipDelta", "stable")
+
+            # GET current contact to read status
+            _sa_ok, _sa_err, _sa_contact = _api_call(
+                "GET",
+                f"{NETWORKING_APP_URL}/api/contacts/{networking_app_contact_id}",
+                None,
+            )
+            if _sa_ok and isinstance(_sa_contact, dict):
+                _old_status = (_sa_contact.get("status") or "").lower()
+                _new_status = None
+
+                # Transition rules
+                if _old_status in ("target", "outreach_sent"):
+                    _new_status = "active"
+                elif _old_status in ("cold", "dormant"):
+                    if _sentiment in ("warm", "enthusiastic"):
+                        _new_status = "warm"
+                    elif _rel_delta == "strengthened":
+                        _new_status = "warm"
+                    # else: neutral/transactional without strengthened → no change
+                elif _old_status == "warm":
+                    _new_status = "active"
+                # active or any other status → no change
+
+                if _new_status and _new_status != _old_status:
+                    _patch_ok, _patch_err, _ = _api_call(
+                        "PATCH",
+                        f"{NETWORKING_APP_URL}/api/contacts/{networking_app_contact_id}",
+                        {"status": _new_status},
+                    )
+                    if _patch_ok:
+                        logger.info(
+                            "[ROUTING] Contact status advance: %s → %s for contact %s",
+                            _old_status, _new_status, networking_app_contact_id,
+                        )
+                        secondary_lane_results.append({
+                            "name": "status_advance",
+                            "status": "success",
+                            "from": _old_status,
+                            "to": _new_status,
+                        })
+                    else:
+                        logger.warning(
+                            "[ROUTING] Contact status advance PATCH failed for %s: %s",
+                            networking_app_contact_id, _patch_err,
+                        )
+                        secondary_lane_results.append({
+                            "name": "status_advance",
+                            "status": "failed",
+                            "error": _patch_err,
+                        })
+                else:
+                    logger.debug(
+                        "[ROUTING] Contact status advance: no transition for status=%s "
+                        "sentiment=%s delta=%s (contact %s)",
+                        _old_status, _sentiment, _rel_delta, networking_app_contact_id,
+                    )
+                    secondary_lane_results.append({
+                        "name": "status_advance",
+                        "status": "skipped_no_transition",
+                    })
+            elif not _sa_ok:
+                logger.warning(
+                    "[ROUTING] Contact status advance: GET contact failed for %s: %s",
+                    networking_app_contact_id, _sa_err,
+                )
+                secondary_lane_results.append({
+                    "name": "status_advance",
+                    "status": "failed",
+                    "error": _sa_err,
+                })
+        except Exception as _sa_exc:
+            logger.warning(
+                "[ROUTING] Contact status advance exception for %s: %s",
+                networking_app_contact_id, _sa_exc,
+            )
+            secondary_lane_results.append({
+                "name": "status_advance",
+                "status": "failed",
+                "error": str(_sa_exc),
+            })
+    else:
+        if not _skip_interaction:
+            # Interaction was attempted but failed — skip status advance
+            secondary_lane_results.append({
+                "name": "status_advance",
+                "status": "skipped_no_interaction",
+            })
+
     # 1B. Standalone commitment records (secondary — non-fatal)
     commit_ok, commit_errs = _route_standalone_commitments(
         conversation_id, synthesis, networking_app_contact_id, sel_conn
