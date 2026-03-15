@@ -54,7 +54,12 @@ def discard_conversation(conversation_id: str, body: dict = None):
         reason = (body or {}).get("reason", "user_discarded")
 
         conn.execute(
-            "UPDATE conversations SET processing_status = 'discarded' WHERE id = ?",
+            """UPDATE conversations
+               SET processing_status = 'discarded',
+                   current_stage = 'completed',
+                   stage_detail = 'discarded',
+                   run_status = 'completed'
+               WHERE id = ?""",
             (conversation_id,),
         )
 
@@ -86,7 +91,10 @@ def mark_reviewed(conversation_id: str):
         conn.execute(
             """UPDATE conversations
                SET reviewed_at = datetime('now'),
-                   processing_status = 'completed'
+                   processing_status = 'completed',
+                   current_stage = 'completed',
+                   stage_detail = 'completed',
+                   run_status = 'completed'
                WHERE id = ?""",
             (conversation_id,),
         )

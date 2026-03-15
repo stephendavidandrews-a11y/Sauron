@@ -197,9 +197,12 @@ def get_conversation(conversation_id: str):
         ).fetchall()
 
         # Get claim_entities junction table data for all claims in this conversation
+        # LEFT JOIN unified_entities to get entity_type for non-person entities
         claim_entities_rows = conn.execute(
-            """SELECT ce.* FROM claim_entities ce
+            """SELECT ce.*, ue.entity_type FROM claim_entities ce
                JOIN event_claims ec ON ce.claim_id = ec.id
+               LEFT JOIN unified_entities ue
+                 ON ce.entity_id = ue.id AND ce.entity_table = 'unified_entities'
                WHERE ec.conversation_id = ?
                ORDER BY ce.created_at""",
             (conversation_id,),

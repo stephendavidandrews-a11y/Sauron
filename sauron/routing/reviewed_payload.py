@@ -100,6 +100,23 @@ def build_reviewed_payload(conversation_id: str) -> dict:
                     else:
                         contact_commitments.append(record)
 
+        # B6: Attach multi-entity links to each claim for routing
+        for claim_dict in claims_list:
+            entity_rows = conn.execute(
+                """SELECT entity_id, entity_name, role, entity_table
+                   FROM claim_entities
+                   WHERE claim_id = ?
+                     AND entity_table = 'unified_contacts'
+                     AND role != 'subject'""",
+                (claim_dict["id"],)
+            ).fetchall()
+            if entity_rows:
+                claim_dict["linked_entities"] = [
+                    {"entity_id": r["entity_id"], "name": r["entity_name"],
+                     "role": r["role"]}
+                    for r in entity_rows
+                ]
+
         claims_payload = {
             "claims": claims_list,
             "memory_writes": memory_writes,

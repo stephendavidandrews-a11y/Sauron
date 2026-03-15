@@ -665,6 +665,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
     conn.executescript(ROUTING_LOG_SQL)
     conn.executescript(SYNTHESIS_ENTITY_LINKS_SQL)
     conn.executescript(ROUTING_SUMMARIES_SQL)
+    conn.executescript(UNIFIED_ENTITIES_SQL)
     conn.close()
     logger.info("[MIGRATION] Schema tables created/verified at %s", db_path)
 
@@ -694,6 +695,9 @@ def _verify_schema(db_path: Path = DB_PATH) -> None:
         ("conversations", "routed_at"),
         ("transcripts", "original_text"),
         ("transcripts", "user_corrected"),
+        ("event_claims", "subject_type"),
+        ("claim_entities", "entity_table"),
+        ("graph_edges", "from_entity_id"),
     ]
     conn = sqlite3.connect(str(db_path), timeout=30)
     missing = []
@@ -835,4 +839,53 @@ CREATE TABLE IF NOT EXISTS pending_object_routes (
 );
 CREATE INDEX IF NOT EXISTS idx_pending_routes_entity ON pending_object_routes(blocked_on_entity);
 CREATE INDEX IF NOT EXISTS idx_pending_routes_status ON pending_object_routes(released_at);
+"""
+
+
+# ── V26: Unified Entities (non-person entity tracking) ──────────
+
+UNIFIED_ENTITIES_SQL = """
+CREATE TABLE IF NOT EXISTS unified_entities (
+    id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    aliases TEXT,
+    description TEXT,
+    first_observed_at TEXT,
+    last_observed_at TEXT,
+    observation_count INTEGER DEFAULT 1,
+    is_confirmed INTEGER DEFAULT 0,
+    source_conversation_id TEXT,
+    created_at DATETIME DEFAULT (datetime('now')),
+    UNIQUE(entity_type, canonical_name)
+);
+CREATE INDEX IF NOT EXISTS idx_unified_entities_type ON unified_entities(entity_type);
+CREATE INDEX IF NOT EXISTS idx_unified_entities_name ON unified_entities(canonical_name);
+
+CREATE TABLE IF NOT EXISTS entity_organizations (
+    entity_id TEXT PRIMARY KEY REFERENCES unified_entities(id) ON DELETE CASCADE,
+    industry TEXT,
+    org_category TEXT,
+    headquarters TEXT,
+    parent_org_entity_id TEXT,
+    networking_app_org_id TEXT,
+    website TEXT
+);
+
+CREATE TABLE IF NOT EXISTS entity_legislation (
+    entity_id TEXT PRIMARY KEY REFERENCES unified_entities(id) ON DELETE CASCADE,
+    bill_number TEXT,
+    congress TEXT,
+    chamber TEXT,
+    committee TEXT,
+    status TEXT,
+    policy_area TEXT,
+    sponsor_names TEXT
+);
+
+CREATE TABLE IF NOT EXISTS entity_topics (
+    entity_id TEXT PRIMARY KEY REFERENCES unified_entities(id) ON DELETE CASCADE,
+    domain TEXT,
+    parent_topic_entity_id TEXT
+);
 """

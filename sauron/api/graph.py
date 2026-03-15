@@ -164,7 +164,7 @@ def list_contacts(limit: int = 500):
 def search_contacts(q: str = Query(..., min_length=1), limit: int = 20):
     """Search contacts by name or alias for entity linking.
 
-    Returns only canonical networking-app contacts (networking_app_contact_id IS NOT NULL)
+    Returns confirmed contacts (with or without networking_app_contact_id)
     as the authoritative source for review linking flows. Deduplicates by
     networking_app_contact_id to handle legacy duplicate rows in unified_contacts.
     """
@@ -175,8 +175,7 @@ def search_contacts(q: str = Query(..., min_length=1), limit: int = 20):
             """SELECT id, canonical_name, email, phone_number, aliases, relationships,
                   networking_app_contact_id, voice_profile_id, is_confirmed
                FROM unified_contacts
-               WHERE networking_app_contact_id IS NOT NULL
-                 AND is_confirmed = 1
+               WHERE is_confirmed = 1
                  AND (canonical_name LIKE ?
                       OR aliases LIKE ?
                       OR email LIKE ?)
@@ -198,6 +197,25 @@ def search_contacts(q: str = Query(..., min_length=1), limit: int = 20):
                 continue
             seen_naid.add(naid)
             deduped.append(d)
+
+        # Also search unified_entities
+        entity_rows = conn.execute(
+            """SELECT id, canonical_name, entity_type, aliases, is_confirmed,
+                      description, observation_count
+               FROM unified_entities
+               WHERE (canonical_name LIKE ? OR aliases LIKE ?)
+               ORDER BY is_confirmed DESC, observation_count DESC, canonical_name
+               LIMIT ?""",
+            (search_term, search_term, limit),
+        ).fetchall()
+
+        # Combine results with source field
+        for d in deduped:
+            d["source"] = "contact"
+        for r in entity_rows:
+            ed = dict(r)
+            ed["source"] = "entity"
+            deduped.append(ed)
 
         return deduped
     finally:
@@ -966,6 +984,14 @@ def create_contact(request: CreateContactRequest):
                 )
                 conn.execute("DELETE FROM unified_contacts WHERE id = ?", (prov_id,))
                 logger.info(f"Absorbed provisional (id={prov_id[:8]}) into new contact (id={contact_id[:8]})")
+
+        # Resolve graph-entity-only people: sentinel + graph_edges text update
+        if request.original_name and request.source_conversation_id:
+            from sauron.api.people_endpoints import _resolve_graph_entity
+            _resolve_graph_entity(
+                conn, request.source_conversation_id, request.original_name,
+                contact_id, name, source="create_contact",
+            )
 
         conn.commit()
         return {

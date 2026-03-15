@@ -60,6 +60,10 @@ class Claim(BaseModel):
     claim_text: str = Field(description="Natural language claim")
     subject_entity_id: str | None = None
     subject_name: str | None = ""
+    subject_type: str = Field(
+        default="person",
+        description="person | organization | legislation | topic"
+    )
     target_entity: str | None = None
     speaker: str | None = None
     modality: str = Field(
@@ -89,14 +93,62 @@ class Claim(BaseModel):
     )
     episode_id: str | None = None
 
+    # Text-specific: evidence quality rating (all modalities can use this)
+    evidence_quality: str | None = Field(
+        default=None,
+        description="explicit | abbreviated | ambiguous | inferred — "
+                    "how directly the claim is stated in the source material"
+    )
+
     # Commitment classification (optional, only for claim_type='commitment')
-    firmness: str | None = None  # concrete | intentional | tentative | social
+    firmness: str | None = None  # required | concrete | intentional | tentative | social
     has_specific_action: bool | None = None
     has_deadline: bool | None = None
     has_condition: bool | None = None
     condition_text: str | None = None
     direction: str | None = None  # owed_by_me | owed_to_me | owed_by_other | mutual
     time_horizon: str | None = None  # ISO date | rough timeframe | 'none'
+
+    # Commitment date resolution (Phase 1 text extraction)
+    due_date: str | None = Field(
+        default=None,
+        description="YYYY-MM-DD resolved date for commitments. "
+                    "Resolved from relative language using cluster timestamp."
+    )
+    date_confidence: str | None = Field(
+        default=None,
+        description="exact | approximate | conditional | null_explained — "
+                    "how confident is the resolved due_date"
+    )
+    date_note: str | None = Field(
+        default=None,
+        description="Context for non-exact dates: 'after Schmitt meeting', "
+                    "'pending recess schedule', 'every Monday recurring', etc."
+    )
+    condition_trigger: str | None = Field(
+        default=None,
+        description="For conditional commitments: natural language description of "
+                    "what event would resolve the condition and activate the commitment"
+    )
+    recurrence: str | None = Field(
+        default=None,
+        description="Recurrence pattern if applicable: "
+                    "'weekly:monday', 'monthly:first_tuesday', 'daily', etc. "
+                    "due_date holds the next occurrence."
+    )
+
+    # Claim linking (pairs ask↔offer, cause↔effect, etc.)
+    related_claim_id: str | None = Field(
+        default=None,
+        description="ID of a related claim in the same cluster "
+                    "(e.g., an ask paired with its corresponding offer)"
+    )
+
+    # Multi-entity linking: additional people involved beyond subject_name
+    additional_entities: list[dict] | None = Field(
+        default=None,
+        description="Other people involved: [{'name': 'Full Name', 'role': 'co_subject|target|beneficiary'}]"
+    )
 
 
 class MemoryWrite(BaseModel):

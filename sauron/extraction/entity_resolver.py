@@ -74,6 +74,124 @@ def _verify_conversation_connection(conn, conversation_id: str, contact_id: str)
     return False
 
 
+def _resolve_additional_entities(
+    conn, conversation_id: str,
+    name_to_contacts: dict, alias_to_contacts: dict,
+    user_linked_claims: set,
+) -> dict:
+    """Resolve additional_entities from extraction JSON into claim_entities rows.
+
+    Reads the stored ClaimsResult JSON (pass_number=2) to find claims with
+    additional_entities, then resolves each name against unified_contacts
+    using the same lookup structures built by resolve_claim_entities().
+    """
+    stats = {"resolved": 0, "skipped": 0}
+
+    # Load extraction JSON
+    row = conn.execute(
+        """SELECT extraction_json FROM extractions
+           WHERE conversation_id = ? AND pass_number = 2""",
+        (conversation_id,),
+    ).fetchone()
+    if not row:
+        return stats
+
+    try:
+        import json as _json
+        data = _json.loads(row["extraction_json"])
+    except Exception:
+        logger.warning(f"Could not parse extraction JSON for {conversation_id[:8]}")
+        return stats
+
+    claims_list = data.get("claims", [])
+    if not claims_list:
+        return stats
+
+    for claim_data in claims_list:
+        additional = claim_data.get("additional_entities")
+        if not additional:
+            continue
+
+        claim_ref = claim_data.get("id", "")
+        claim_id = f"{conversation_id}_{claim_ref}"
+
+        # Skip if user has manually linked this claim
+        if claim_id in user_linked_claims:
+            stats["skipped"] += 1
+            continue
+
+        for ae in additional:
+            ae_name = (ae.get("name") or "").strip()
+            ae_role = ae.get("role", "target")
+            if not ae_name:
+                continue
+
+            ae_lower = ae_name.lower()
+            match = None
+
+            # Stage 1: Direct canonical name match
+            candidates = name_to_contacts.get(ae_lower, [])
+            if len(candidates) == 1:
+                match = candidates[0]
+            elif len(candidates) > 1:
+                # Ambiguous — skip
+                continue
+
+            # Stage 2: Alias match
+            if not match:
+                candidates = alias_to_contacts.get(ae_lower, [])
+                if len(candidates) == 1:
+                    match = candidates[0]
+                elif len(candidates) > 1:
+                    continue
+
+            if not match:
+                continue
+
+            # Check if this exact link already exists
+            existing = conn.execute(
+                """SELECT 1 FROM claim_entities
+                   WHERE claim_id = ? AND entity_id = ? AND role = ?""",
+                (claim_id, match["id"], ae_role),
+            ).fetchone()
+            if existing:
+                continue
+
+            # Also check for user link on this specific entity
+            user_link = conn.execute(
+                """SELECT 1 FROM claim_entities
+                   WHERE claim_id = ? AND entity_id = ? AND link_source = 'user'""",
+                (claim_id, match["id"]),
+            ).fetchone()
+            if user_link:
+                stats["skipped"] += 1
+                continue
+
+            conn.execute(
+                """INSERT OR IGNORE INTO claim_entities
+                   (id, claim_id, entity_id, entity_name, role, confidence,
+                    link_source, entity_table)
+                   VALUES (?, ?, ?, ?, ?, NULL, 'resolver', 'unified_contacts')""",
+                (str(uuid.uuid4()), claim_id, match["id"],
+                 match["canonical_name"], ae_role),
+            )
+            stats["resolved"] += 1
+
+            # Learn alias if name differs
+            try:
+                from sauron.extraction.alias_learner import learn_alias
+                learn_alias(conn, match["id"], ae_name, match["canonical_name"])
+            except Exception:
+                pass
+
+            logger.debug(
+                f"Additional entity '{ae_name}' -> {match['canonical_name']} "
+                f"(role={ae_role}) for claim {claim_id[:8]}"
+            )
+
+    return stats
+
+
 def resolve_claim_entities(conversation_id: str) -> dict:
     """Resolve unlinked claim entities for a conversation.
 
@@ -97,7 +215,8 @@ def resolve_claim_entities(conversation_id: str) -> dict:
                  AND subject_entity_id IS NULL
                  AND subject_name IS NOT NULL
                  AND subject_name != ''
-                 AND (review_status IS NULL OR review_status = 'unreviewed')""",
+                 AND (review_status IS NULL OR review_status = 'unreviewed')
+                 AND (subject_type IS NULL OR subject_type = 'person')""",
             (conversation_id,),
         ).fetchall()
 
@@ -313,11 +432,23 @@ def resolve_claim_entities(conversation_id: str) -> dict:
             else:
                 stats["unresolved"] += 1
 
+        # ── B4: Resolve additional_entities from extraction JSON ──
+        ae_stats = _resolve_additional_entities(
+            conn, conversation_id, name_to_contacts, alias_to_contacts,
+            user_linked_claims,
+        )
+        stats["ae_resolved"] = ae_stats.get("resolved", 0)
+        stats["ae_skipped"] = ae_stats.get("skipped", 0)
+
         conn.commit()
+        ae_info = ""
+        if stats["ae_resolved"]:
+            ae_info = f", {stats['ae_resolved']} additional entities linked"
         logger.info(
             f"Entity resolution for {conversation_id[:8]}: "
             f"{stats['resolved']} resolved, {stats['ambiguous']} ambiguous, "
             f"{stats['unresolved']} unresolved, {stats['skipped_user']} user-protected"
+            f"{ae_info}"
         )
     except Exception:
         conn.rollback()

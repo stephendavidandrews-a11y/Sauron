@@ -14,6 +14,67 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+
+def _resolve_graph_entity(conn, conversation_id: str, original_name: str,
+                          entity_id: str, canonical_name: str, source: str = "user"):
+    """Link a graph-edge-only person to a contact.
+
+    1. Insert synthesis_entity_links sentinel so the people panel sees it.
+    2. Update graph_edges text so the graph panel shows the canonical name.
+    """
+    import uuid as _uuid
+
+    orig_stripped = original_name.strip()
+    orig_lower = orig_stripped.lower()
+
+    # 1. Sentinel: only if no existing link for this specific name
+    existing = conn.execute("""
+        SELECT 1 FROM synthesis_entity_links
+        WHERE conversation_id = ?
+          AND LOWER(TRIM(original_name)) = ?
+          AND resolved_entity_id = ?
+        LIMIT 1
+    """, (conversation_id, orig_lower, entity_id)).fetchone()
+
+    existing_claim = conn.execute("""
+        SELECT 1 FROM event_claims
+        WHERE conversation_id = ?
+          AND LOWER(TRIM(subject_name)) = ?
+          AND subject_entity_id = ?
+        LIMIT 1
+    """, (conversation_id, orig_lower, entity_id)).fetchone()
+
+    if not existing and not existing_claim:
+        conn.execute("""
+            INSERT INTO synthesis_entity_links
+                (id, conversation_id, object_type, object_index, field_name,
+                 original_name, resolved_entity_id, link_source, confidence)
+            VALUES (?, ?, 'graph_entity', 0, 'entity', ?, ?, ?, 1.0)
+        """, (str(_uuid.uuid4()), conversation_id,
+              orig_stripped, entity_id, source))
+        logger.info("[RESOLVE] Sentinel: %s -> %s in %s",
+                    orig_stripped, canonical_name, conversation_id[:8])
+
+    # 2. Update graph_edges text to canonical name
+    if orig_lower != canonical_name.strip().lower():
+        updated_from = conn.execute("""
+            UPDATE graph_edges SET from_entity = ?
+            WHERE source_conversation_id = ?
+              AND LOWER(TRIM(from_entity)) = ?
+        """, (canonical_name, conversation_id, orig_lower)).rowcount
+
+        updated_to = conn.execute("""
+            UPDATE graph_edges SET to_entity = ?
+            WHERE source_conversation_id = ?
+              AND LOWER(TRIM(to_entity)) = ?
+        """, (canonical_name, conversation_id, orig_lower)).rowcount
+
+        if updated_from or updated_to:
+            logger.info("[RESOLVE] Graph edges: '%s' -> '%s' (%d from, %d to) in %s",
+                        orig_stripped, canonical_name,
+                        updated_from, updated_to, conversation_id[:8])
+
+
 SELF_ENTITY_ID = "948c2cf3-9a8c-49d5-853c-d54e91b7133a"
 
 # Singular→plural mapping for synthesis object types
@@ -93,6 +154,7 @@ def list_conversation_people(conversation_id: str):
             LEFT JOIN unified_contacts uc ON uc.id = ce.entity_id
             WHERE ec.conversation_id = ?
               AND (ec.review_status IS NULL OR ec.review_status != 'dismissed')
+              AND (ce.entity_table = 'unified_contacts' OR ce.entity_table IS NULL)
         """, (conversation_id,)).fetchall()
 
         for ce in ce_rows:
@@ -216,16 +278,39 @@ def list_conversation_people(conversation_id: str):
         # canonical_name "Daniel Park" (case-insensitive), merge claims into
         # the resolved entry. Display-only — no DB mutation.
         resolved_by_name = {}  # lowered canonical_name -> key
+        resolved_all_names = {}  # every name variant -> key
         for key, data in people_map.items():
             if data["entity_id"] and data["canonical_name"]:
-                resolved_by_name[data["canonical_name"].strip().lower()] = key
+                cn = data["canonical_name"].strip().lower()
+                resolved_by_name[cn] = key
+                resolved_all_names[cn] = key
+                for oname in data["original_names"]:
+                    resolved_all_names[oname.strip().lower()] = key
+                # Also load aliases from unified_contacts
+                try:
+                    alias_row = conn.execute(
+                        "SELECT aliases FROM unified_contacts WHERE id = ?",
+                        (data["entity_id"],),
+                    ).fetchone()
+                    if alias_row and alias_row["aliases"]:
+                        raw = alias_row["aliases"]
+                        # Handle semicolon-separated or JSON array
+                        if raw.startswith("["):
+                            import json as _json
+                            alias_list = _json.loads(raw)
+                        else:
+                            alias_list = [a.strip() for a in raw.split(";") if a.strip()]
+                        for alias in alias_list:
+                            resolved_all_names[alias.strip().lower()] = key
+                except Exception:
+                    pass
 
         unresolved_keys = [k for k in people_map if k.startswith("unresolved:")]
         for ukey in unresolved_keys:
             udata = people_map[ukey]
-            # Check each original_name against resolved canonical names
+            # Check each original_name against resolved canonical + alias names
             for uname in list(udata["original_names"]):
-                match_key = resolved_by_name.get(uname.strip().lower())
+                match_key = resolved_all_names.get(uname.strip().lower())
                 if match_key and match_key in people_map:
                     # Merge into resolved entry
                     rdata = people_map[match_key]
@@ -253,6 +338,8 @@ def list_conversation_people(conversation_id: str):
                 status = "unresolved"
             elif is_confirmed == 0:
                 status = "provisional"
+            elif is_confirmed == 1:
+                status = "confirmed"
             elif link_sources & {"user", "speaker_cascade", "confirm_person", "bulk_reassign"}:
                 status = "confirmed"
             else:
@@ -370,6 +457,11 @@ def confirm_person(conversation_id: str, request: ConfirmPersonRequest):
               AND link_source != 'user'
         """, (request.entity_id, conversation_id))
 
+        # Resolve graph-entity-only people: sentinel + graph_edges text update
+        _resolve_graph_entity(
+            conn, conversation_id, request.original_name,
+            request.entity_id, canonical_name, source="confirm_person",
+        )
         conn.commit()
         return {
             "status": "ok",
@@ -561,5 +653,49 @@ def dismiss_person(conversation_id: str, request: SkipPersonRequest):
             "dismissed_name": request.original_name,
             "links_updated": updated,
         }
+    finally:
+        conn.close()
+
+
+
+@router.get("/{conversation_id}/entities")
+def get_conversation_entities(conversation_id: str):
+    """Get non-person entities referenced in this conversation."""
+    conn = get_connection()
+    try:
+        # Source 1: claim_entities with entity_table='unified_entities'
+        ce_rows = conn.execute("""
+            SELECT DISTINCT ue.id, ue.entity_type, ue.canonical_name, ue.aliases,
+                   ue.is_confirmed, ue.observation_count, ue.description
+            FROM claim_entities ce
+            JOIN event_claims ec ON ec.id = ce.claim_id
+            JOIN unified_entities ue ON ue.id = ce.entity_id
+            WHERE ec.conversation_id = ?
+              AND ce.entity_table = 'unified_entities'
+              AND (ec.review_status IS NULL OR ec.review_status != 'dismissed')
+        """, (conversation_id,)).fetchall()
+
+        entities_map = {}
+        for row in ce_rows:
+            d = dict(row)
+            entities_map[d["id"]] = d
+
+        # Source 2: graph_edges with entity references
+        ge_rows = conn.execute("""
+            SELECT DISTINCT ue.id, ue.entity_type, ue.canonical_name, ue.aliases,
+                   ue.is_confirmed, ue.observation_count, ue.description
+            FROM graph_edges ge
+            JOIN unified_entities ue
+              ON (ue.id = ge.from_entity_id AND ge.from_entity_table = 'unified_entities')
+              OR (ue.id = ge.to_entity_id AND ge.to_entity_table = 'unified_entities')
+            WHERE ge.source_conversation_id = ?
+        """, (conversation_id,)).fetchall()
+
+        for row in ge_rows:
+            d = dict(row)
+            if d["id"] not in entities_map:
+                entities_map[d["id"]] = d
+
+        return list(entities_map.values())
     finally:
         conn.close()

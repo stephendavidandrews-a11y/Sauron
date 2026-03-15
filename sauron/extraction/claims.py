@@ -149,6 +149,62 @@ RULES — you MUST follow all of these:
    the same fact attributed to different subjects.
 
 ═══════════════════════════════════════════════════════════════
+SUBJECT TYPE
+═══════════════════════════════════════════════════════════════
+
+Determine whether the claim is primarily about a person, organization, legislation, or topic.
+
+subject_type: "person" | "organization" | "legislation" | "topic"
+
+Rules:
+- "person" (default): The claim describes a person's action, position, commitment, or state
+  e.g., "Will believes the bill will pass" → subject_type="person", subject_name="Will Simpson"
+- "legislation": The claim is fundamentally about a bill, law, regulation, or rule
+  e.g., "The GUARD Act won't make the markup" → subject_type="legislation", subject_name="GUARD Act"
+  e.g., "The Wyden-Durbin bill covers transportation" → subject_type="legislation", subject_name="Wyden-Durbin bill"
+- "organization": The claim is about an org's action, state, or policy
+  e.g., "CFTC is restructuring the Division of Enforcement" → subject_type="organization", subject_name="CFTC"
+  e.g., "Allstate is hiring a new government affairs lead" → subject_type="organization", subject_name="Allstate"
+- "topic": The claim is about a general topic, project, or event
+  e.g., "The Senate markup is scheduled for March 19" → subject_type="topic", subject_name="Senate markup"
+  e.g., "DeFi regulation is stalling" → subject_type="topic", subject_name="DeFi regulation"
+
+IMPORTANT: The speaker is ALWAYS captured in the "speaker" field regardless of subject_type.
+If Will Simpson reports "The GUARD Act won't make the markup":
+  subject_type="legislation", subject_name="GUARD Act", speaker="Will Simpson"
+
+When uncertain between person and non-person, prefer person. Most claims are about people.
+
+═══════════════════════════════════════════════════════════════
+ADDITIONAL ENTITIES
+═══════════════════════════════════════════════════════════════
+
+For each claim, identify ALL people involved beyond the primary subject_name.
+
+additional_entities: [
+  {"name": "Full Name", "role": "co_subject | target | beneficiary"}
+]
+
+Rules:
+- co_subject: Both people are equally the subject of the claim
+  e.g., "Stephen and Catherine are engaged" → subject_name="Stephen Andrews",
+        additional_entities=[{"name": "Catherine Cole", "role": "co_subject"}]
+  e.g., "Will and Daniel will draft the memo together" → subject_name="Will Simpson",
+        additional_entities=[{"name": "Daniel Park", "role": "co_subject"}]
+- target: The person being acted upon, told about, or referenced
+  e.g., "Stephen invited Catherine to golf" → subject_name="Stephen Andrews",
+        additional_entities=[{"name": "Catherine Cole", "role": "target"}]
+  e.g., "Will told Grassley about the bill" → subject_name="Will Simpson",
+        additional_entities=[{"name": "Chuck Grassley", "role": "target"}]
+- beneficiary: Person who benefits from the action
+  e.g., "Daniel is drafting the memo for Grassley" → subject_name="Daniel Park",
+        additional_entities=[{"name": "Chuck Grassley", "role": "beneficiary"}]
+- OMIT additional_entities (or set to null/[]) when the claim is truly about one person only
+- OMIT the speaker if they are only reporting, not participating in the claim
+- Only add PEOPLE, not organizations/bills/topics — those go in target_entity
+- Use FULL NAMES from the participant roster
+
+═══════════════════════════════════════════════════════════════
 STAGE 3: FILTER
 ═══════════════════════════════════════════════════════════════
 
@@ -176,6 +232,7 @@ Output ONLY valid JSON — no preamble, no commentary, no markdown fences:
       "claim_text": "Natural language claim — one atomic statement",
       "subject_entity_id": null,
       "subject_name": "Person or entity the claim is about",
+      "subject_type": "person | organization | legislation | topic",
       "target_entity": "What the claim references or null",
       "speaker": "Who said this",
       "modality": "stated | inferred | implied",
@@ -195,7 +252,8 @@ Output ONLY valid JSON — no preamble, no commentary, no markdown fences:
       "has_condition": "true | false | null",
       "condition_text": "the contingency if present, null otherwise",
       "direction": "owed_by_me | owed_to_me | owed_by_other | mutual | null",
-      "time_horizon": "ISO date | rough timeframe string | none | null"
+      "time_horizon": "ISO date | rough timeframe string | none | null",
+      "additional_entities": [{"name": "Full Name", "role": "co_subject | target | beneficiary"}]
     }
   ],
   "memory_writes": [

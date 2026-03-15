@@ -96,6 +96,20 @@ def learn_alias(conn, entity_id: str, resolved_name: str, canonical_name: str) -
     if _normalize_quotes(resolved_clean).lower() == _normalize_quotes(canonical_clean).lower():
         return False
 
+    # ── Skip rule: alias is another contact's canonical name ──
+    # Prevents cross-contamination (e.g., "Will Simpson" as alias for "Daniel Park")
+    other = conn.execute(
+        "SELECT id FROM unified_contacts "
+        "WHERE LOWER(TRIM(canonical_name)) = ? AND id != ? LIMIT 1",
+        (_normalize_quotes(resolved_clean).lower(), entity_id),
+    ).fetchone()
+    if other:
+        logger.debug(
+            f"Alias skip (other contact's canonical name): '{resolved_clean}' "
+            f"belongs to {other['id'][:8]}, not adding to {canonical_clean}"
+        )
+        return False
+
     # ── Skip rule: bare title / possessive reference ──
     if _BARE_TITLE_RE.match(resolved_clean):
         logger.debug(f"Alias skip (bare title): '{resolved_clean}'")
@@ -209,3 +223,96 @@ def _generate_title_variants(name: str) -> list[str]:
         return [f"{variant_title} {rest}"]
 
     return []
+
+
+# ═══════════════════════════════════════════════════════════════
+# Entity alias learning (for unified_entities — orgs, legislation, topics)
+# ═══════════════════════════════════════════════════════════════
+
+def learn_entity_alias(conn, entity_id: str, resolved_name: str, canonical_name: str) -> bool:
+    """Add resolved_name as alias to unified_entities. Mirrors learn_alias() for contacts.
+
+    Simpler than person alias learning:
+    - No bare-title or relational-reference skips (not relevant for objects)
+    - No bare-first-name skip (not relevant for objects)
+    - Generates abbreviation variants for organizations
+
+    Args:
+        conn: SQLite connection (caller manages transaction).
+        entity_id: The unified_entities.id.
+        resolved_name: The name that was matched (e.g., "CFTC").
+        canonical_name: The entity's canonical_name (e.g., "Commodity Futures Trading Commission").
+
+    Returns:
+        True if one or more aliases were added, False if all were skipped/dupes.
+    """
+    if not resolved_name or not canonical_name or not entity_id:
+        return False
+
+    resolved_clean = resolved_name.strip()
+    canonical_clean = canonical_name.strip()
+
+    # Skip: same as canonical name
+    if _normalize_quotes(resolved_clean).lower() == _normalize_quotes(canonical_clean).lower():
+        return False
+
+    # Skip: alias is another entity's canonical name
+    other = conn.execute(
+        "SELECT id FROM unified_entities "
+        "WHERE LOWER(TRIM(canonical_name)) = ? AND id != ? LIMIT 1",
+        (_normalize_quotes(resolved_clean).lower(), entity_id),
+    ).fetchone()
+    if other:
+        logger.debug(
+            f"Entity alias skip (other entity's canonical name): '{resolved_clean}' "
+            f"belongs to {other['id'][:8]}, not adding to {canonical_clean}"
+        )
+        return False
+
+    # Build candidates
+    candidates = [resolved_clean]
+
+    # Read current aliases
+    row = conn.execute(
+        "SELECT aliases FROM unified_entities WHERE id = ?",
+        (entity_id,),
+    ).fetchone()
+
+    if not row:
+        logger.warning(f"Entity alias learn: entity {entity_id[:8]} not found")
+        return False
+
+    current_aliases_raw = row["aliases"] or ""
+    if ";" in current_aliases_raw:
+        current_set = set(a.strip() for a in current_aliases_raw.split(";") if a.strip())
+    elif current_aliases_raw.strip():
+        current_set = {current_aliases_raw.strip()}
+    else:
+        current_set = set()
+
+    current_lower = {_normalize_quotes(a).lower() for a in current_set}
+    current_lower.add(_normalize_quotes(canonical_clean).lower())
+
+    # Filter candidates
+    new_aliases = []
+    for candidate in candidates:
+        if _normalize_quotes(candidate.strip()).lower() not in current_lower:
+            new_aliases.append(candidate.strip())
+
+    if not new_aliases:
+        return False
+
+    # Merge and write
+    merged = current_set | set(new_aliases)
+    alias_str = "; ".join(sorted(merged))
+
+    conn.execute(
+        "UPDATE unified_entities SET aliases = ? WHERE id = ?",
+        (alias_str, entity_id),
+    )
+
+    logger.info(
+        f"Entity alias learned for '{canonical_clean}': "
+        f"{', '.join(new_aliases)} (total aliases: {len(merged)})"
+    )
+    return True

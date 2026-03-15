@@ -13,6 +13,43 @@ from sauron.config import DB_PATH, NETWORKING_APP_URL
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+def _ensure_unified_entity(conn, org_name: str, networking_org_id: str = None, is_confirmed: bool = True):
+    """Create or update a unified_entity for an organization. Returns entity_id."""
+    import uuid as _uuid
+    normalized = org_name.strip()
+    # Check if already exists
+    existing = conn.execute(
+        "SELECT id FROM unified_entities WHERE entity_type='organization' AND LOWER(canonical_name) = ?",
+        (normalized.lower(),),
+    ).fetchone()
+    if existing:
+        entity_id = existing[0] if isinstance(existing, tuple) else existing["id"]
+        # Update confirmation status and org_id if needed
+        conn.execute(
+            "UPDATE unified_entities SET is_confirmed = 1 WHERE id = ? AND is_confirmed = 0",
+            (entity_id,),
+        )
+        if networking_org_id:
+            conn.execute(
+                "UPDATE entity_organizations SET networking_app_org_id = ? WHERE entity_id = ? AND networking_app_org_id IS NULL",
+                (networking_org_id, entity_id),
+            )
+        return entity_id
+
+    # Create new
+    entity_id = str(_uuid.uuid4())
+    conn.execute(
+        """INSERT INTO unified_entities (id, entity_type, canonical_name, is_confirmed, observation_count, created_at)
+           VALUES (?, 'organization', ?, ?, 1, datetime('now'))""",
+        (entity_id, normalized, 1 if is_confirmed else 0),
+    )
+    conn.execute(
+        "INSERT INTO entity_organizations (entity_id, networking_app_org_id) VALUES (?, ?)",
+        (entity_id, networking_org_id),
+    )
+    return entity_id
+
 TIMEOUT = 15.0
 
 
@@ -180,7 +217,14 @@ def approve_provisional_org(suggestion_id: str, body: ApproveRequest = ApproveRe
         """, (org_id, resolved_meta, now, norm))
         conn.commit()
 
-        logger.info(f"Approved provisional org '{suggestion['raw_name']}' -> org_id={org_id}")
+        # E2: Create/update unified_entity for this org
+        try:
+            entity_id = _ensure_unified_entity(conn, suggestion["raw_name"], org_id, is_confirmed=True)
+            conn.commit()
+            logger.info(f"Approved provisional org '{suggestion['raw_name']}' -> org_id={org_id}, entity_id={entity_id}")
+        except Exception:
+            logger.exception("Failed to create unified_entity for approved org (non-fatal)")
+            logger.info(f"Approved provisional org '{suggestion['raw_name']}' -> org_id={org_id}")
         return {
             "status": "approved",
             "org_id": org_id,
@@ -231,7 +275,14 @@ def merge_provisional_org(suggestion_id: str, body: MergeRequest):
         """, (body.targetOrgId, resolved_meta, now, norm))
         conn.commit()
 
-        logger.info(f"Merged provisional org '{suggestion['raw_name']}' -> target_org_id={body.targetOrgId}")
+        # E2: Create/update unified_entity for the merge target
+        try:
+            entity_id = _ensure_unified_entity(conn, suggestion["raw_name"], body.targetOrgId, is_confirmed=True)
+            conn.commit()
+            logger.info(f"Merged provisional org '{suggestion['raw_name']}' -> target_org_id={body.targetOrgId}, entity_id={entity_id}")
+        except Exception:
+            logger.exception("Failed to create unified_entity for merged org (non-fatal)")
+            logger.info(f"Merged provisional org '{suggestion['raw_name']}' -> target_org_id={body.targetOrgId}")
         return {
             "status": "merged",
             "target_org_id": body.targetOrgId,

@@ -796,15 +796,26 @@ def _single_speaker_fallback(duration: float):
 
 
 def _update_status(conn, conversation_id: str, status: str):
-    """Update conversation processing status with timestamp for terminal-ish statuses."""
+    """Update conversation processing status with timestamp for terminal-ish statuses.
+    Also writes the unified stage model (current_stage, stage_detail, run_status).
+    """
+    from sauron.pipeline.stage_model import stage_for_voice_status
+
     terminal_statuses = (
         "transcribed", "completed", "error",
         "awaiting_speaker_review", "triage_rejected", "awaiting_claim_review",
     )
     now = datetime.now(timezone.utc).isoformat() if status in terminal_statuses else None
+    current_stage, stage_detail, run_status = stage_for_voice_status(status)
     conn.execute(
-        "UPDATE conversations SET processing_status = ?, processed_at = COALESCE(?, processed_at) WHERE id = ?",
-        (status, now, conversation_id),
+        """UPDATE conversations
+           SET processing_status = ?,
+               processed_at = COALESCE(?, processed_at),
+               current_stage = ?,
+               stage_detail = ?,
+               run_status = ?
+           WHERE id = ?""",
+        (status, now, current_stage, stage_detail, run_status, conversation_id),
     )
 
 
@@ -1157,6 +1168,15 @@ def _run_deep_extraction_only(
                 from sauron.extraction.entity_resolver import resolve_claim_entities
                 conn.commit()
                 entity_stats = resolve_claim_entities(conversation_id)
+
+                # Resolve non-person entities (orgs, legislation, topics)
+                try:
+                    from sauron.extraction.object_resolver import resolve_object_entities
+                    obj_stats = resolve_object_entities(conversation_id)
+                    if obj_stats.get("resolved") or obj_stats.get("created"):
+                        logger.info(f"[{conversation_id[:8]}] Object resolution: {obj_stats}")
+                except Exception:
+                    logger.exception("Object resolution failed (non-fatal)")
                 logger.info(f"[{conversation_id[:8]}] Entity resolution: {entity_stats}")
             except Exception:
                 logger.exception("Entity resolution failed (non-fatal)")
@@ -1247,17 +1267,18 @@ def _store_claims(conn, conversation_id: str, claims_result):
         conn.execute(
             """INSERT OR IGNORE INTO event_claims
                (id, conversation_id, episode_id, claim_type, claim_text,
-                subject_entity_id, subject_name, target_entity, speaker_id,
+                subject_entity_id, subject_name, subject_type, target_entity, speaker_id,
                 modality, polarity, confidence, stability,
                 evidence_quote, evidence_start, evidence_end, review_after,
                 importance, evidence_type,
                 firmness, has_specific_action, has_deadline, has_condition,
                 condition_text, direction, time_horizon)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                        ?, ?, ?, ?, ?, ?, ?)""",
             (claim_id, conversation_id, episode_id,
              claim.claim_type, claim.claim_text,
-             claim.subject_entity_id, claim.subject_name, claim.target_entity,
+             claim.subject_entity_id, claim.subject_name,
+             getattr(claim, 'subject_type', 'person'), claim.target_entity,
              claim.speaker, claim.modality, claim.polarity,
              claim.confidence, claim.stability,
              claim.evidence_quote, claim.evidence_start, claim.evidence_end,
@@ -1270,6 +1291,41 @@ def _store_claims(conn, conversation_id: str, claims_result):
              getattr(claim, 'direction', None),
              getattr(claim, 'time_horizon', None)),
         )
+
+        # B3: Store additional entity links from multi-entity claims
+        additional = getattr(claim, 'additional_entities', None)
+        if additional:
+            for ae in additional:
+                ae_name = (ae.get("name") or "").strip()
+                ae_role = ae.get("role", "target")
+                if not ae_name:
+                    continue
+                # Quick lookup against unified_contacts
+                contact = conn.execute(
+                    "SELECT id, canonical_name FROM unified_contacts "
+                    "WHERE LOWER(TRIM(canonical_name)) = ?",
+                    (ae_name.lower(),)
+                ).fetchone()
+                if not contact:
+                    contact = conn.execute(
+                        "SELECT id, canonical_name FROM unified_contacts "
+                        "WHERE LOWER(aliases) LIKE ?",
+                        (f"%{ae_name.lower()}%",)
+                    ).fetchone()
+                if contact:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO claim_entities
+                           (id, claim_id, entity_id, entity_name, role, confidence,
+                            link_source, entity_table)
+                           VALUES (?, ?, ?, ?, ?, ?, 'model', 'unified_contacts')""",
+                        (str(uuid.uuid4()), claim_id, dict(contact)["id"],
+                         dict(contact)["canonical_name"], ae_role, claim.confidence),
+                    )
+                else:
+                    logger.debug(
+                        f"Additional entity '{ae_name}' not found in contacts — "
+                        f"deferred to entity resolver"
+                    )
 
 
 def _create_provisional_contacts(conn, conversation_id: str, claims_result):
@@ -1467,6 +1523,57 @@ def _store_belief_updates(conn, conversation_id, synthesis, claims_result):
                  bu.confidence, bu.evidence_role),
             )
 
+        # C8: Resolve entity_id for beliefs
+        if bu.entity_type and bu.entity_type != 'person' and bu.entity_name and not bu.entity_id:
+            entity_row = conn.execute(
+                "SELECT id FROM unified_entities WHERE LOWER(canonical_name) = ?",
+                (bu.entity_name.strip().lower(),),
+            ).fetchone()
+            if entity_row:
+                conn.execute(
+                    "UPDATE beliefs SET entity_id = ? WHERE id = ?",
+                    (entity_row["id"], belief_id),
+                )
+        elif bu.entity_type == 'person' and bu.entity_name and not bu.entity_id:
+            contact_row = conn.execute(
+                "SELECT id FROM unified_contacts WHERE LOWER(canonical_name) = ?",
+                (bu.entity_name.strip().lower(),),
+            ).fetchone()
+            if contact_row:
+                conn.execute(
+                    "UPDATE beliefs SET entity_id = ? WHERE id = ?",
+                    (contact_row["id"], belief_id),
+                )
+
+
+def _resolve_graph_entity(conn, name: str, entity_type: str):
+    """Resolve graph edge entity name to (id, table) tuple."""
+    if not name:
+        return None, None
+    name_lower = name.strip().lower()
+    if entity_type == "person":
+        row = conn.execute(
+            "SELECT id FROM unified_contacts WHERE LOWER(canonical_name) = ?",
+            (name_lower,),
+        ).fetchone()
+        if not row:
+            row = conn.execute(
+                "SELECT id FROM unified_contacts WHERE LOWER(aliases) LIKE ?",
+                (f"%{name_lower}%",),
+            ).fetchone()
+        return (row["id"], "unified_contacts") if row else (None, None)
+    else:
+        row = conn.execute(
+            "SELECT id FROM unified_entities WHERE LOWER(canonical_name) = ?",
+            (name_lower,),
+        ).fetchone()
+        if not row:
+            row = conn.execute(
+                "SELECT id FROM unified_entities WHERE LOWER(aliases) LIKE ?",
+                (f"%{name_lower}%",),
+            ).fetchone()
+        return (row["id"], "unified_entities") if row else (None, None)
+
 
 def _store_graph_edges(conn, conversation_id, synthesis):
     """Store graph edges from Opus synthesis.
@@ -1483,15 +1590,28 @@ def _store_graph_edges(conn, conversation_id, synthesis):
 
     now = datetime.now(timezone.utc).isoformat()
     for edge in synthesis.graph_edges:
+        edge_id = str(uuid.uuid4())
         conn.execute(
             """INSERT INTO graph_edges
                (id, from_entity, from_type, to_entity, to_type,
                 edge_type, strength, source_conversation_id, observed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(uuid.uuid4()), edge.from_entity, edge.from_type,
+            (edge_id, edge.from_entity, edge.from_type,
              edge.to_entity, edge.to_type, edge.edge_type,
              edge.strength, conversation_id, now),
         )
+
+        # Resolve entity IDs for this edge
+        from_id, from_table = _resolve_graph_entity(conn, edge.from_entity, edge.from_type)
+        to_id, to_table = _resolve_graph_entity(conn, edge.to_entity, edge.to_type)
+        if from_id or to_id:
+            conn.execute(
+                """UPDATE graph_edges
+                   SET from_entity_id=?, from_entity_table=?,
+                       to_entity_id=?, to_entity_table=?
+                   WHERE id=?""",
+                (from_id, from_table, to_id, to_table, edge_id),
+            )
 
 
 def _load_existing_beliefs(conn, speaker_map: dict | None) -> list[dict]:

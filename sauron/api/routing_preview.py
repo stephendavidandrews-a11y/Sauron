@@ -37,7 +37,8 @@ def _get_object_summary(obj_type_plural: str, item: dict) -> str:
         return (item.get("description") or "")[:120]
     elif obj_type_plural == "policy_positions":
         topic = item.get('topic', '')
-        return f"{item.get('person', '')}: {item.get('position', '')} {topic}"[:120]
+        person = item.get('person', '') or item.get('entity', '')
+        return f"{person}: {item.get('position', '')} {topic}"[:120]
     return str(item)[:120]
 
 

@@ -66,9 +66,21 @@ def _resolve_contact_id_for_entity(
         ).fetchone()
         if row and row["networking_app_contact_id"]:
             return row["networking_app_contact_id"]
+
+        # E1: Try unified_entities → entity_organizations for org routing
+        org_row = conn.execute(
+            """SELECT eo.networking_app_org_id
+               FROM unified_entities ue
+               JOIN entity_organizations eo ON eo.entity_id = ue.id
+               WHERE (LOWER(ue.canonical_name) = LOWER(?)
+                      OR LOWER(ue.aliases) LIKE LOWER(?))
+                 AND eo.networking_app_org_id IS NOT NULL""",
+            (entity_name.strip(), f"%{entity_name.strip()}%"),
+        ).fetchone()
+        if org_row and org_row["networking_app_org_id"]:
+            return org_row["networking_app_org_id"]
+
         # Step F: Return None on miss — do NOT fall back to primary.
-        # Callers must handle None (skip the object) rather than
-        # silently misattribute to the conversation's primary contact.
         return None
     finally:
         conn.close()
@@ -122,3 +134,20 @@ def _resolve_with_synthesis_links(
 
     # Fallback: old name-string resolution (backward compat)
     return _resolve_contact_id_for_entity(entity_name, fallback_contact_id)
+
+
+def _resolve_multi_entity_claim(conn, claim_id: str) -> list:
+    """Return all resolved entities for a claim from claim_entities.
+
+    Used by routing lanes that need to iterate all linked entities
+    (not just the primary subject).
+    """
+    rows = conn.execute(
+        """SELECT ce.entity_id, ce.entity_name, ce.role,
+                  uc.networking_app_contact_id
+           FROM claim_entities ce
+           LEFT JOIN unified_contacts uc ON uc.id = ce.entity_id
+           WHERE ce.claim_id = ? AND ce.entity_table = 'unified_contacts'""",
+        (claim_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]

@@ -465,6 +465,31 @@ export const api = {
       body: JSON.stringify({ original_name: originalName, entity_id: entityId }),
     }),
 
+  // Unified entities (non-person)
+  conversationEntities: (conversationId) =>
+    fetchJSON(`/conversations/${conversationId}/entities`),
+  entityList: (entityType = null, confirmed = null) => {
+    const params = new URLSearchParams();
+    if (entityType) params.append('entity_type', entityType);
+    if (confirmed !== null) params.append('confirmed', confirmed);
+    return fetchJSON(`/entities?${params}`);
+  },
+  entityDetail: (entityId) => fetchJSON(`/entities/${entityId}`),
+  confirmEntity: (entityId) =>
+    fetchJSON(`/entities/${entityId}/confirm`, { method: 'POST' }),
+  dismissEntity: (entityId) =>
+    fetchJSON(`/entities/${entityId}/dismiss`, { method: 'POST' }),
+  mergeEntities: (keeperId, otherId) =>
+    fetchJSON(`/entities/merge`, {
+      method: 'POST',
+      body: JSON.stringify({ keeper_id: keeperId, other_id: otherId }),
+    }),
+  updateEntity: (entityId, updates) =>
+    fetchJSON(`/entities/${entityId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }),
+
   // Contact duplicate detection
   checkDuplicateContacts: () =>
     fetchJSON("/graph/duplicates"),

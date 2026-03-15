@@ -249,7 +249,7 @@ class EntityLink(BaseModel):
     user_feedback: Optional[str] = None
 
 
-def sync_claim_entities_subject(conn, claim_id: str, entity_id: str, entity_name: str, link_source: str = "user"):
+def sync_claim_entities_subject(conn, claim_id: str, entity_id: str, entity_name: str, link_source: str = "user", entity_table: str = "unified_contacts"):
     """Sync the claim_entities junction table for a subject role.
 
     Source of truth sync rule: whenever claim_entities changes for a claim,
@@ -282,9 +282,9 @@ def sync_claim_entities_subject(conn, claim_id: str, entity_id: str, entity_name
         # Insert new entry
         conn.execute(
             """INSERT INTO claim_entities
-               (id, claim_id, entity_id, entity_name, role, confidence, link_source)
-               VALUES (?, ?, ?, ?, 'subject', NULL, ?)""",
-            (str(uuid.uuid4()), claim_id, entity_id, entity_name, link_source),
+               (id, claim_id, entity_id, entity_name, role, confidence, link_source, entity_table)
+               VALUES (?, ?, ?, ?, 'subject', NULL, ?, ?)""",
+            (str(uuid.uuid4()), claim_id, entity_id, entity_name, link_source, entity_table),
         )
 
     # Sync event_claims.subject_entity_id to the FIRST user-linked entity, or most recent

@@ -401,6 +401,12 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         # -- Step 24: Fix routing_summaries types --
         _run_v24_fix_routing_summaries_types(conn)
 
+        # -- Step 25: v25 Phase 1 Text Ingestion tables --
+        _run_v25_text_tables(conn)
+
+        # -- Step 26: v26 Unified Entities (non-person entity tracking) --
+        _run_v26_unified_entities(conn)
+
         conn.commit()
         logger.info("[MIGRATION] All migrations complete.")
 
@@ -578,7 +584,6 @@ def _run_v15_routing_log(conn):
     logger.info("  routing_log table created (or already exists)")
 
 
-
 def _run_v16_synthesis_entity_links(conn):
     """v16: Add synthesis_entity_links table for entity resolution Phase 1."""
     logger.info("Running v16 migration (synthesis_entity_links table)...")
@@ -629,7 +634,6 @@ def _run_v18_routing_summaries(conn):
         logger.info("  routing_summaries table already exists")
 
 
-
 def _run_v19_affiliation_cache(conn):
     """v19 (Wave 2): Add contact_affiliations_cache table.
 
@@ -670,13 +674,6 @@ def _run_v19_affiliation_cache(conn):
             conn.execute("ALTER TABLE contact_affiliations_cache ADD COLUMN resolution_source TEXT")
             logger.info("  Added resolution_source column to contact_affiliations_cache")
         logger.info("  contact_affiliations_cache table already exists")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    print(f"Running v5 migration on {DB_PATH} ...")
-    run_migration()
-    print("Done.")
 
 
 def _run_v20_affiliation_cache_is_primary(conn):
@@ -732,7 +729,6 @@ def _run_v21_provisional_org_suggestions(conn):
             conn.commit()
             print("[migrate] v21: added resolution_source_context column")
         print("[migrate] v21: provisional_org_suggestions already exists, skipping")
-
 
 
 def _run_v22_current_identity(conn):
@@ -823,3 +819,329 @@ def _run_v24_fix_routing_summaries_types(conn):
         logger.info("[MIGRATION] v24: routing_summaries types fixed (conversation_id -> TEXT, id -> TEXT)")
     else:
         logger.info("[MIGRATION] v24: routing_summaries types already correct")
+
+
+def _run_v25_text_tables(conn):
+    """v25: Phase 1 Text Ingestion — new tables + conversations columns."""
+    logger.info("Running v25 migration (text ingestion tables)...")
+
+    # 1. Add modality columns to conversations (backward-compatible)
+    added = 0
+    for col, col_type in [
+        ("modality", "TEXT DEFAULT 'voice'"),
+        ("current_stage", "TEXT DEFAULT 'ingest'"),
+        ("stage_detail", "TEXT"),
+        ("run_status", "TEXT DEFAULT 'active'"),
+        ("blocking_reason", "TEXT"),
+    ]:
+        if _add_column_safe(conn, "conversations", col, col_type):
+            added += 1
+    if added:
+        logger.info(f"  Added {added} text columns to conversations")
+
+    # 2. Add evidence_quality to event_claims
+    _add_column_safe(conn, "event_claims", "evidence_quality", "TEXT")
+
+    # 3. Create text tables
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS text_threads (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            thread_identifier TEXT NOT NULL,
+            thread_type TEXT NOT NULL,
+            display_name TEXT,
+            participant_phones TEXT,
+            participant_contact_ids TEXT,
+            first_message_at DATETIME,
+            last_message_at DATETIME,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT (datetime('now')),
+            UNIQUE(source, thread_identifier)
+        );
+
+        CREATE TABLE IF NOT EXISTS text_messages (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL REFERENCES text_threads(id),
+            source_message_id TEXT,
+            sender_phone TEXT,
+            sender_contact_id TEXT,
+            direction TEXT NOT NULL,
+            content TEXT,
+            content_type TEXT DEFAULT 'text',
+            timestamp DATETIME NOT NULL,
+            is_group_message INTEGER DEFAULT 0,
+            attachment_type TEXT,
+            attachment_filename TEXT,
+            attachment_url TEXT,
+            refers_to_message_id TEXT,
+            is_from_me INTEGER,
+            raw_metadata TEXT,
+            created_at DATETIME DEFAULT (datetime('now')),
+            UNIQUE(thread_id, source_message_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tm_thread ON text_messages(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_tm_timestamp ON text_messages(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_tm_sender ON text_messages(sender_contact_id);
+
+        CREATE TABLE IF NOT EXISTS text_clusters (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL REFERENCES text_threads(id),
+            conversation_id TEXT REFERENCES conversations(id),
+            cluster_method TEXT DEFAULT 'overnight_split',
+            depth_lane INTEGER,
+            start_time DATETIME NOT NULL,
+            end_time DATETIME NOT NULL,
+            message_count INTEGER,
+            participant_count INTEGER,
+            merged_from TEXT,
+            split_from TEXT,
+            created_at DATETIME DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_tc_thread ON text_clusters(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_tc_conversation ON text_clusters(conversation_id);
+
+        CREATE TABLE IF NOT EXISTS text_cluster_messages (
+            cluster_id TEXT NOT NULL REFERENCES text_clusters(id),
+            message_id TEXT NOT NULL REFERENCES text_messages(id),
+            ordinal INTEGER NOT NULL,
+            PRIMARY KEY (cluster_id, message_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tcm_cluster ON text_cluster_messages(cluster_id);
+        CREATE INDEX IF NOT EXISTS idx_tcm_message ON text_cluster_messages(message_id);
+
+        CREATE TABLE IF NOT EXISTS text_sync_state (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL UNIQUE,
+            last_sync_at DATETIME,
+            last_message_id TEXT,
+            last_status TEXT DEFAULT 'never_run',
+            messages_processed INTEGER DEFAULT 0,
+            errors TEXT,
+            created_at DATETIME DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS pending_contacts (
+            id TEXT PRIMARY KEY,
+            phone TEXT NOT NULL,
+            display_name TEXT,
+            source TEXT NOT NULL,
+            first_seen_at DATETIME NOT NULL,
+            last_seen_at DATETIME,
+            message_count INTEGER DEFAULT 0,
+            thread_ids TEXT,
+            status TEXT DEFAULT 'pending',
+            resolved_contact_id TEXT,
+            reviewed_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now')),
+            UNIQUE(phone, source)
+        );
+
+        CREATE TABLE IF NOT EXISTS review_policy_rules (
+            id TEXT PRIMARY KEY,
+            modality TEXT NOT NULL,
+            claim_type TEXT,
+            condition_json TEXT,
+            tier TEXT NOT NULL,
+            rationale TEXT,
+            priority INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT (datetime('now'))
+        );
+    """)
+    logger.info("  Text tables created (or already exist)")
+
+    # 4. Seed default review policy rules (only if table is empty)
+    cursor = conn.execute("SELECT COUNT(*) FROM review_policy_rules")
+    if cursor.fetchone()[0] == 0:
+        _seed_review_policy_rules(conn)
+        logger.info("  Seeded default review policy rules")
+    else:
+        logger.info("  Review policy rules already seeded")
+
+    conn.commit()
+    logger.info("v25 migration complete.")
+
+
+def _seed_review_policy_rules(conn):
+    """Seed default text review policy rules from the Phase 1 plan."""
+    import json as _json
+    import uuid as _uuid
+
+    rules = [
+        (100, "*", "*", {"creates_new_contact": True}, "hold", "Never auto-create contacts"),
+        (95, "*", "*", {"confidence_lt": 0.5}, "hold", "Unreliable extraction"),
+        (90, "*", "*", {"evidence_quality": "ambiguous"}, "hold", "Ambiguous evidence held"),
+        (85, "*", "*", {"evidence_quality": "inferred"}, "hold", "Pattern-inferred claims need validation"),
+        (80, "text", "relationship", None, "hold", "Relationship claims sensitive in Phase 1"),
+        (75, "text", "tactical", {"evidence_quality_ne": "explicit"}, "hold", "Inferred tactical reads held"),
+        (70, "text", "observation", {"evidence_quality_ne": "explicit"}, "hold", "Pattern-based observations held"),
+        (65, "*", "commitment", None, "quick_review", "ALL commitments get human review"),
+        (60, "*", "position", None, "quick_review", "Positions deserve sanity check"),
+        (55, "text", "tactical", {"evidence_quality": "explicit"}, "quick_review", "Explicit tactical advice worth a glance"),
+        (50, "text", "observation", {"evidence_quality": "explicit"}, "quick_review", "Explicit emotional statements reliable"),
+        (45, "*", "fact", {"evidence_quality": "explicit", "confidence_gt": 0.85}, "auto_route", "High-confidence explicit facts safe"),
+        (40, "*", "preference", {"evidence_quality": "explicit", "confidence_gt": 0.8}, "auto_route", "Clear explicit preferences safe"),
+        (10, "*", "*", None, "quick_review", "Default: human glances at it"),
+    ]
+    for priority, modality, claim_type, condition, tier, rationale in rules:
+        conn.execute(
+            """INSERT INTO review_policy_rules (id, modality, claim_type, condition_json, tier, rationale, priority)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (str(_uuid.uuid4()), modality, claim_type, _json.dumps(condition) if condition else None, tier, rationale, priority),
+        )
+
+
+
+
+def _run_v26_unified_entities(conn):
+    """v26: Unified Entities — non-person entity tracking.
+
+    Creates:
+    - unified_entities table (superclass for orgs, legislation, topics)
+    - entity_organizations, entity_legislation, entity_topics (subtype details)
+    - subject_type column on event_claims
+    - entity_table discriminator on claim_entities
+    - entity ID columns on graph_edges
+    - composite indexes for entity lookups
+    """
+    logger.info("Running v26 migration (unified entities)...")
+
+    # -- A1: Create unified_entities + subtype tables --
+    if not _table_exists(conn, "unified_entities"):
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS unified_entities (
+                id TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                canonical_name TEXT NOT NULL,
+                aliases TEXT,
+                description TEXT,
+                first_observed_at TEXT,
+                last_observed_at TEXT,
+                observation_count INTEGER DEFAULT 1,
+                is_confirmed INTEGER DEFAULT 0,
+                source_conversation_id TEXT,
+                created_at DATETIME DEFAULT (datetime('now')),
+                UNIQUE(entity_type, canonical_name)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_unified_entities_type ON unified_entities(entity_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_unified_entities_name ON unified_entities(canonical_name)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS entity_organizations (
+                entity_id TEXT PRIMARY KEY REFERENCES unified_entities(id) ON DELETE CASCADE,
+                industry TEXT,
+                org_category TEXT,
+                headquarters TEXT,
+                parent_org_entity_id TEXT,
+                networking_app_org_id TEXT,
+                website TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS entity_legislation (
+                entity_id TEXT PRIMARY KEY REFERENCES unified_entities(id) ON DELETE CASCADE,
+                bill_number TEXT,
+                congress TEXT,
+                chamber TEXT,
+                committee TEXT,
+                status TEXT,
+                policy_area TEXT,
+                sponsor_names TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS entity_topics (
+                entity_id TEXT PRIMARY KEY REFERENCES unified_entities(id) ON DELETE CASCADE,
+                domain TEXT,
+                parent_topic_entity_id TEXT
+            )
+        """)
+        logger.info("  Created unified_entities + subtype tables")
+    else:
+        logger.info("  unified_entities already exists")
+
+    # -- A2: Add subject_type to event_claims --
+    if _add_column_safe(conn, "event_claims", "subject_type", "TEXT DEFAULT 'person'"):
+        logger.info("  Added event_claims.subject_type")
+
+    # -- A3: Add entity_table discriminator to claim_entities --
+    if _add_column_safe(conn, "claim_entities", "entity_table", "TEXT DEFAULT 'unified_contacts'"):
+        logger.info("  Added claim_entities.entity_table")
+
+    # -- A4: Add entity ID columns to graph_edges --
+    added = 0
+    if _add_column_safe(conn, "graph_edges", "from_entity_id", "TEXT"):
+        added += 1
+    if _add_column_safe(conn, "graph_edges", "from_entity_table", "TEXT"):
+        added += 1
+    if _add_column_safe(conn, "graph_edges", "to_entity_id", "TEXT"):
+        added += 1
+    if _add_column_safe(conn, "graph_edges", "to_entity_table", "TEXT"):
+        added += 1
+    if added:
+        logger.info(f"  Added {added} entity ID columns to graph_edges")
+
+    # -- A5: Composite indexes for entity lookups --
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_claim_entities_entity_table ON claim_entities(entity_table, entity_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_from_entity ON graph_edges(from_entity_table, from_entity_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_to_entity ON graph_edges(to_entity_table, to_entity_id)")
+    logger.info("  Composite indexes created (or already exist)")
+
+    # E3: Seed confirmed org entities from contact_affiliations_cache
+    try:
+        rows = conn.execute(
+            """SELECT DISTINCT networking_org_id, org_name, org_industry
+               FROM contact_affiliations_cache
+               WHERE networking_org_id IS NOT NULL AND org_name IS NOT NULL
+                 AND org_name != ''"""
+        ).fetchall()
+
+        import uuid as _uuid
+        seeded = 0
+        for row in rows:
+            # Tuple indices: (0=networking_org_id, 1=org_name, 2=org_industry)
+            org_name = (row[1] or "").strip()
+            networking_org_id = row[0]
+            org_industry = row[2]
+            if not org_name:
+                continue
+
+            existing = conn.execute(
+                "SELECT id FROM unified_entities WHERE entity_type='organization' AND LOWER(canonical_name) = ?",
+                (org_name.lower(),),
+            ).fetchone()
+
+            if existing:
+                conn.execute(
+                    "UPDATE entity_organizations SET networking_app_org_id = ? WHERE entity_id = ? AND networking_app_org_id IS NULL",
+                    (networking_org_id, existing[0]),
+                )
+                continue
+
+            entity_id = str(_uuid.uuid4())
+            conn.execute(
+                """INSERT INTO unified_entities
+                   (id, entity_type, canonical_name, is_confirmed, created_at)
+                   VALUES (?, 'organization', ?, 1, datetime('now'))""",
+                (entity_id, org_name),
+            )
+            conn.execute(
+                """INSERT INTO entity_organizations
+                   (entity_id, industry, networking_app_org_id)
+                   VALUES (?, ?, ?)""",
+                (entity_id, org_industry, networking_org_id),
+            )
+            seeded += 1
+
+        if seeded:
+            logger.info(f"  Seeded {seeded} org entities from contact_affiliations_cache")
+    except Exception:
+        logger.warning("  contact_affiliations_cache seeding failed (non-fatal)")
+
+    logger.info("v26 migration complete.")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    print(f"Running v5 migration on {DB_PATH} ...")
+    run_migration()
+    print("Done.")

@@ -85,9 +85,12 @@ def link_synthesis_entities(conversation_id: str) -> dict:
                     "original_name": name.strip(),
                 })
 
+        # Separate person refs from object refs (object refs resolved separately by E4)
+        person_references = [r for r in references if r.get("object_type") != "graph_edge_object"]
+
         # Deduplicate by original_name (resolve each unique name once)
         unique_names: dict[str, list[dict]] = {}
-        for ref in references:
+        for ref in person_references:
             key = ref["original_name"].strip().lower()
             if key not in unique_names:
                 unique_names[key] = []
@@ -137,10 +140,15 @@ def link_synthesis_entities(conversation_id: str) -> dict:
                 )
 
         conn.commit()
+
+        # E4: Resolve non-person entity references in graph edges
+        object_stats = _resolve_object_refs(conn, conversation_id, references)
+        stats.update(object_stats)
+
         logger.info(
             f"[{conversation_id[:8]}] Synthesis linking: "
             f"{stats['resolved']} resolved, {stats['provisional']} provisional, "
-            f"{stats['skipped']} skipped"
+            f"{stats['skipped']} skipped, {stats.get('object_resolved', 0)} objects linked"
         )
         return stats
 
@@ -196,7 +204,13 @@ def _collect_person_references(synthesis: dict) -> list[dict]:
                 "original_name": from_name,
             })
         elif from_name:
-            logger.debug(f"Skipping non-person graph edge from_entity: '{from_name}' (type={from_type})")
+            refs.append({
+                "object_type": "graph_edge_object",
+                "object_index": i,
+                "field_name": "from_entity",
+                "original_name": from_name,
+                "entity_type": from_type,
+            })
         if to_name and to_type == "person":
             refs.append({
                 "object_type": "graph_edge",
@@ -205,7 +219,13 @@ def _collect_person_references(synthesis: dict) -> list[dict]:
                 "original_name": to_name,
             })
         elif to_name:
-            logger.debug(f"Skipping non-person graph edge to_entity: '{to_name}' (type={to_type})")
+            refs.append({
+                "object_type": "graph_edge_object",
+                "object_index": i,
+                "field_name": "to_entity",
+                "original_name": to_name,
+                "entity_type": to_type,
+            })
 
     # New contacts mentioned (from claims pass)
     for i, name in enumerate(synthesis.get("new_contacts_mentioned", [])):
@@ -363,6 +383,71 @@ def _build_contacts_cache(conn) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════
 # Provisional contact creation
 # ═══════════════════════════════════════════════════════════════
+
+def _resolve_object_refs(conn, conversation_id: str, refs: list[dict]) -> dict:
+    """Resolve non-person entity references against unified_entities.
+
+    Returns stats dict with resolved/skipped counts.
+    """
+    object_refs = [r for r in refs if r.get("object_type") == "graph_edge_object"]
+    if not object_refs:
+        return {"object_resolved": 0, "object_skipped": 0}
+
+    # Build lookup from unified_entities
+    entity_rows = conn.execute(
+        "SELECT id, entity_type, canonical_name, aliases FROM unified_entities"
+    ).fetchall()
+    lookup = {}  # lowercase name -> (id, entity_type)
+    for row in entity_rows:
+        d = dict(row)
+        lookup[d["canonical_name"].lower()] = (d["id"], d["entity_type"])
+        if d["aliases"]:
+            for alias in d["aliases"].split(","):
+                alias = alias.strip().lower()
+                if alias:
+                    lookup[alias] = (d["id"], d["entity_type"])
+
+    resolved = 0
+    skipped = 0
+    for ref in object_refs:
+        name = ref["original_name"].lower()
+        match = lookup.get(name)
+        if not match:
+            skipped += 1
+            continue
+
+        entity_id, entity_type = match
+        field = ref["field_name"]
+        idx = ref["object_index"]
+
+        # Update graph_edges table for this conversation
+        if field == "from_entity":
+            conn.execute(
+                """UPDATE graph_edges
+                   SET from_entity_id = ?, from_entity_table = 'unified_entities'
+                   WHERE source_conversation_id = ?
+                     AND from_entity = ? AND from_entity_id IS NULL""",
+                (entity_id, conversation_id, ref["original_name"]),
+            )
+        elif field == "to_entity":
+            conn.execute(
+                """UPDATE graph_edges
+                   SET to_entity_id = ?, to_entity_table = 'unified_entities'
+                   WHERE source_conversation_id = ?
+                     AND to_entity = ? AND to_entity_id IS NULL""",
+                (entity_id, conversation_id, ref["original_name"]),
+            )
+        resolved += 1
+
+    if resolved:
+        conn.commit()
+        logger.info(
+            "[SynthesisLinker] Resolved %d non-person entity refs (%d skipped) for %s",
+            resolved, skipped, conversation_id[:8],
+        )
+
+    return {"object_resolved": resolved, "object_skipped": skipped}
+
 
 def _create_provisional_and_link_claims(
     conn, conversation_id: str, name: str

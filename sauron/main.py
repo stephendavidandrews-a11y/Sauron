@@ -137,6 +137,15 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
 
+        # Text sync every 2 hours
+        from sauron.text.sync import run_text_sync_job
+        _scheduler.add_job(
+            run_text_sync_job,
+            IntervalTrigger(hours=2),
+            id="text_sync",
+            replace_existing=True,
+        )
+
         _scheduler.start()
         logger.info("Scheduler started (morning brief 6:30am daily, learning analysis weekly, routing retry every 30m)")
     except ImportError:
@@ -198,6 +207,8 @@ from sauron.api.provisional_orgs_api import router as provisional_orgs_router
 from sauron.api.graph_edges_api import router as graph_edges_router
 from sauron.api.rename import router as rename_router
 from sauron.api.text_replace import router as text_replace_router
+from sauron.api.text_api import router as text_router
+from sauron.api.entities_api import router as entities_router
 
 app.include_router(conversations_router, prefix="/api")
 app.include_router(profiles_router, prefix="/api")
@@ -217,6 +228,8 @@ app.include_router(provisional_orgs_router, prefix="/api")
 app.include_router(graph_edges_router, prefix="/api")
 app.include_router(rename_router, prefix="/api")
 app.include_router(text_replace_router, prefix="/api")
+app.include_router(text_router, prefix="/api")
+app.include_router(entities_router, prefix="/api")
 
 
 @app.get("/api/health")
