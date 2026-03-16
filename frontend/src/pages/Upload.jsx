@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 
@@ -327,7 +327,7 @@ function RecentUploads() {
   const [convos, setConvos] = useState([]);
   const navigate = useNavigate();
 
-  useState(() => {
+  useEffect(() => {
     // Load recent conversations to show processing status
     api.conversations(10, 0).then(data => {
       const recent = (data.conversations || data || [])

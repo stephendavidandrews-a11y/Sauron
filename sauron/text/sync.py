@@ -25,6 +25,8 @@ Flow:
 import json
 import logging
 import sqlite3
+
+from sauron.db.connection import get_connection as _db_conn
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,10 +45,8 @@ from sauron.text.text_pipeline import process_text_cluster
 def _resolve_graph_edge_entities(conversation_id: str, db_path=None):
     """Post-resolve graph edge entity IDs after entity resolution has run."""
     from sauron.config import DB_PATH as _DB
-    import sqlite3 as _sql
-
-    with _sql.connect(db_path or _DB) as conn:
-        conn.row_factory = _sql.Row
+    conn = _get_conn(db_path or _DB)
+    try:
         edges = conn.execute(
             """SELECT id, from_entity, from_type, to_entity, to_type
                FROM graph_edges
@@ -113,6 +113,8 @@ def _resolve_graph_edge_entities(conversation_id: str, db_path=None):
                 "[TextSync] Resolved entity IDs for %d graph edges in %s",
                 updated, conversation_id[:8],
             )
+    finally:
+        conn.close()
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +127,15 @@ SONNET_COST_PER_CALL = 0.05
 
 
 def _get_conn(db_path=None) -> sqlite3.Connection:
-    path = str(db_path or DB_PATH)
-    conn = sqlite3.connect(path, timeout=30)
+    """Get a connection with WAL, FK, and busy_timeout pragmas."""
+    if db_path is None:
+        return _db_conn()
+    # Custom path — apply same pragmas as get_connection
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -504,8 +512,11 @@ def _process_single_cluster(
                 triage=triage,
             )
             # Store as pass 3 in extractions table
-            with sqlite3.connect(db_path or DB_PATH) as conn:
+            with sqlite3.connect(str(db_path or DB_PATH), timeout=30) as conn:
                 conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA busy_timeout=30000")
                 conn.execute("""
                     INSERT OR REPLACE INTO extractions
                         (id, conversation_id, pass_number, model_used,
@@ -533,8 +544,11 @@ def _process_single_cluster(
             # Store graph_edges in the graph_edges table (for review UI)
             if edge_count > 0:
                 import uuid as _uuid
-                with sqlite3.connect(db_path or DB_PATH) as conn2:
+                with sqlite3.connect(str(db_path or DB_PATH), timeout=30) as conn2:
                     conn2.row_factory = sqlite3.Row
+                    conn2.execute("PRAGMA journal_mode=WAL")
+                    conn2.execute("PRAGMA foreign_keys=ON")
+                    conn2.execute("PRAGMA busy_timeout=30000")
                     # Clear old edges for this conversation
                     conn2.execute(
                         "DELETE FROM graph_edges WHERE source_conversation_id = ?",

@@ -21,6 +21,8 @@ The condition_matches table must be created via migrate_db() or init_db().
 import json
 import logging
 import sqlite3
+
+from sauron.db.connection import get_connection as _db_conn
 import uuid
 from datetime import datetime, timezone
 
@@ -80,9 +82,14 @@ def check_conditions(
         List of match dicts: {conditional_claim_id, matching_claim_id, similarity,
                              condition_trigger, matching_claim_text, status}
     """
-    path = str(db_path or DB_PATH)
-    conn = sqlite3.connect(path, timeout=30)
-    conn.row_factory = sqlite3.Row
+    if db_path:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
+    else:
+        conn = _db_conn()
 
     try:
         ensure_condition_matches_table(conn)
@@ -249,9 +256,14 @@ def resolve_condition_match(
     Returns:
         dict with resolution details
     """
-    path = str(db_path or DB_PATH)
-    conn = sqlite3.connect(path, timeout=30)
-    conn.row_factory = sqlite3.Row
+    if db_path:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
+    else:
+        conn = _db_conn()
 
     try:
         match = conn.execute(
@@ -327,9 +339,14 @@ def get_pending_condition_matches(db_path: str | None = None) -> list[dict]:
     Returns:
         List of dicts with match details + the original commitment context
     """
-    path = str(db_path or DB_PATH)
-    conn = sqlite3.connect(path, timeout=30)
-    conn.row_factory = sqlite3.Row
+    if db_path:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
+    else:
+        conn = _db_conn()
 
     try:
         ensure_condition_matches_table(conn)

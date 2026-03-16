@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS conversations (
     flagged_for_review BOOLEAN DEFAULT 0,
     reviewed_at DATETIME,
     routed_at DATETIME,
+    modality TEXT DEFAULT 'voice',
+    current_stage TEXT DEFAULT 'ingest',
+    stage_detail TEXT,
+    run_status TEXT DEFAULT 'active',
+    blocking_reason TEXT,
     created_at DATETIME DEFAULT (datetime('now'))
 );
 
@@ -137,6 +142,7 @@ CREATE TABLE IF NOT EXISTS contact_affiliations_cache (
     start_date TEXT,
     end_date TEXT,
     resolution_source TEXT,
+    is_primary BOOLEAN DEFAULT 0,
     synced_at DATETIME DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cac_contact ON contact_affiliations_cache(unified_contact_id);
@@ -186,6 +192,10 @@ CREATE TABLE IF NOT EXISTS unified_contacts (
     aliases TEXT,
     relationships TEXT,
     is_confirmed BOOLEAN DEFAULT 1,
+    source_conversation_id TEXT,
+    current_title TEXT,
+    current_organization TEXT,
+    title TEXT,
     created_at DATETIME DEFAULT (datetime('now'))
 );
 
@@ -268,6 +278,13 @@ CREATE TABLE IF NOT EXISTS graph_edges (
     expires_at DATETIME,
     superseded_by TEXT,
     notes TEXT,
+    review_status TEXT,
+    reviewed_at DATETIME,
+    review_note TEXT,
+    from_entity_id TEXT,
+    from_entity_table TEXT,
+    to_entity_id TEXT,
+    to_entity_table TEXT,
     created_at DATETIME DEFAULT (datetime('now'))
 );
 
@@ -362,6 +379,7 @@ CREATE TABLE IF NOT EXISTS prompt_amendments (
     source_analysis TEXT,
     correction_count INTEGER,
     active BOOLEAN DEFAULT TRUE,
+    target_pass TEXT DEFAULT 'claims',
     created_at DATETIME DEFAULT (datetime('now'))
 );
 
@@ -437,6 +455,15 @@ CREATE TABLE IF NOT EXISTS event_claims (
     direction TEXT,
     time_horizon TEXT,
     text_user_edited BOOLEAN DEFAULT 0,
+    evidence_quality TEXT,
+    due_date TEXT,
+    date_confidence TEXT,
+    date_note TEXT,
+    condition_trigger TEXT,
+    recurrence TEXT,
+    related_claim_id TEXT,
+    review_tier TEXT,
+    subject_type TEXT DEFAULT 'person',
     created_at DATETIME DEFAULT (datetime('now'))
 );
 
@@ -445,6 +472,7 @@ CREATE TABLE IF NOT EXISTS claim_entities (
     claim_id TEXT REFERENCES event_claims(id) ON DELETE CASCADE,
     entity_id TEXT REFERENCES unified_contacts(id),
     entity_name TEXT,
+    entity_table TEXT DEFAULT 'unified_contacts',
     role TEXT DEFAULT 'subject',
     confidence REAL,
     link_source TEXT DEFAULT 'model',
@@ -650,6 +678,171 @@ CREATE TABLE IF NOT EXISTS reprocessing_comparisons (
     created_at DATETIME DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_reprocess_conversation ON reprocessing_comparisons(conversation_id);
+
+-- ═══ New Indexes (audit Wave 1) ═══
+
+CREATE INDEX IF NOT EXISTS idx_event_claims_review_status ON event_claims(review_status);
+CREATE INDEX IF NOT EXISTS idx_event_claims_review_tier ON event_claims(review_tier);
+CREATE INDEX IF NOT EXISTS idx_event_claims_due_date ON event_claims(due_date);
+CREATE INDEX IF NOT EXISTS idx_conversations_modality ON conversations(modality);
+CREATE INDEX IF NOT EXISTS idx_conversations_run_status ON conversations(run_status);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_source_conv ON graph_edges(source_conversation_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_from_entity_id ON graph_edges(from_entity_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_to_entity_id ON graph_edges(to_entity_id);
+
+
+-- Text Ingestion (Phase 1) — matches live DB schema
+
+CREATE TABLE IF NOT EXISTS text_threads (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    thread_identifier TEXT NOT NULL,
+    thread_type TEXT NOT NULL,
+    display_name TEXT,
+    participant_phones TEXT,
+    participant_contact_ids TEXT,
+    first_message_at DATETIME,
+    last_message_at DATETIME,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT (datetime('now')),
+    UNIQUE(source, thread_identifier)
+);
+
+CREATE TABLE IF NOT EXISTS text_messages (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES text_threads(id),
+    source_message_id TEXT,
+    sender_phone TEXT,
+    sender_contact_id TEXT,
+    direction TEXT NOT NULL,
+    content TEXT,
+    content_type TEXT DEFAULT 'text',
+    timestamp DATETIME NOT NULL,
+    is_group_message INTEGER DEFAULT 0,
+    attachment_type TEXT,
+    attachment_filename TEXT,
+    attachment_url TEXT,
+    refers_to_message_id TEXT,
+    is_from_me INTEGER,
+    raw_metadata TEXT,
+    created_at DATETIME DEFAULT (datetime('now')),
+    UNIQUE(thread_id, source_message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tm_thread ON text_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_tm_timestamp ON text_messages(timestamp);
+CREATE INDEX IF NOT EXISTS idx_tm_sender ON text_messages(sender_contact_id);
+
+CREATE TABLE IF NOT EXISTS text_clusters (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES text_threads(id),
+    conversation_id TEXT REFERENCES conversations(id),
+    cluster_method TEXT DEFAULT 'overnight_split',
+    depth_lane INTEGER,
+    start_time DATETIME NOT NULL,
+    end_time DATETIME NOT NULL,
+    message_count INTEGER,
+    participant_count INTEGER,
+    merged_from TEXT,
+    split_from TEXT,
+    created_at DATETIME DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tc_thread ON text_clusters(thread_id);
+CREATE INDEX IF NOT EXISTS idx_tc_conversation ON text_clusters(conversation_id);
+
+CREATE TABLE IF NOT EXISTS text_cluster_messages (
+    cluster_id TEXT NOT NULL REFERENCES text_clusters(id),
+    message_id TEXT NOT NULL REFERENCES text_messages(id),
+    ordinal INTEGER NOT NULL,
+    PRIMARY KEY (cluster_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tcm_cluster ON text_cluster_messages(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_tcm_message ON text_cluster_messages(message_id);
+
+CREATE TABLE IF NOT EXISTS text_sync_state (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL UNIQUE,
+    last_sync_at DATETIME,
+    last_message_id TEXT,
+    last_status TEXT DEFAULT 'never_run',
+    messages_processed INTEGER DEFAULT 0,
+    errors TEXT,
+    created_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pending_contacts (
+    id TEXT PRIMARY KEY,
+    phone TEXT NOT NULL,
+    display_name TEXT,
+    source TEXT NOT NULL,
+    first_seen_at DATETIME NOT NULL,
+    last_seen_at DATETIME,
+    message_count INTEGER DEFAULT 0,
+    thread_ids TEXT,
+    status TEXT DEFAULT 'pending',
+    resolved_contact_id TEXT,
+    reviewed_at DATETIME,
+    created_at DATETIME DEFAULT (datetime('now')),
+    UNIQUE(phone, source)
+);
+
+CREATE TABLE IF NOT EXISTS review_policy_rules (
+    id TEXT PRIMARY KEY,
+    modality TEXT NOT NULL,
+    claim_type TEXT,
+    condition_json TEXT,
+    tier TEXT NOT NULL,
+    rationale TEXT,
+    priority INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS transcript_annotations (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT REFERENCES conversations(id),
+    transcript_segment_id TEXT REFERENCES transcripts(id),
+    start_char INTEGER NOT NULL,
+    end_char INTEGER NOT NULL,
+    original_text TEXT NOT NULL,
+    resolved_contact_id TEXT REFERENCES unified_contacts(id),
+    resolved_name TEXT NOT NULL,
+    annotation_type TEXT DEFAULT 'name',
+    created_at DATETIME DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_transcript_annotations_conversation
+    ON transcript_annotations(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_transcript_annotations_segment
+    ON transcript_annotations(transcript_segment_id);
+
+CREATE TABLE IF NOT EXISTS condition_matches (
+    id TEXT PRIMARY KEY,
+    conditional_claim_id TEXT NOT NULL,
+    matching_claim_id TEXT NOT NULL,
+    matching_conversation_id TEXT,
+    similarity REAL NOT NULL,
+    condition_trigger TEXT,
+    matching_claim_text TEXT,
+    status TEXT DEFAULT 'pending',
+    resolved_due_date TEXT,
+    reviewer_notes TEXT,
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    FOREIGN KEY (conditional_claim_id) REFERENCES event_claims(id),
+    FOREIGN KEY (matching_claim_id) REFERENCES event_claims(id)
+);
+CREATE INDEX IF NOT EXISTS idx_condition_matches_status ON condition_matches(status);
+
+CREATE TABLE IF NOT EXISTS merge_audit_log (
+    id TEXT PRIMARY KEY,
+    networking_app_contact_id TEXT NOT NULL,
+    keeper_id TEXT NOT NULL,
+    keeper_name TEXT,
+    removed_ids TEXT,
+    removed_names TEXT,
+    fields_merged TEXT,
+    fk_updates TEXT,
+    created_at DATETIME DEFAULT (datetime('now'))
+);
 
 
 """

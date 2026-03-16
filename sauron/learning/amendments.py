@@ -37,14 +37,14 @@ from sauron.db.connection import get_connection
 
 logger = logging.getLogger(__name__)
 
-_HAIKU_MODEL = TRIAGE_MODEL
+_AMENDMENT_MODEL = "claude-sonnet-4-6"  # was Haiku — Sonnet writes better rules
 # Generalization gating thresholds (per Iterative_Improvement_Spec)
 _FAST_TYPES = {
     "wrong_modality", "wrong_claim_type", "wrong_confidence",
     "bad_commitment_extraction", "overstated_position",
 }
 _FAST_THRESHOLD = 3
-_SLOW_THRESHOLD = 5
+_SLOW_THRESHOLD = 3
 _EMA_HALFLIFE_DAYS = 30
 _client: Optional[anthropic.Anthropic] = None
 
@@ -52,7 +52,7 @@ _client: Optional[anthropic.Anthropic] = None
 def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic()
+        _client = anthropic.Anthropic(max_retries=2)
     return _client
 
 
@@ -67,15 +67,18 @@ def get_active_amendment() -> str | None:
     Only one amendment version is active at a time (active=TRUE).
     """
     conn = get_connection()
-    row = conn.execute(
-        """
-        SELECT amendment_text FROM prompt_amendments
-        WHERE active = TRUE
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-    ).fetchone()
-    return row["amendment_text"] if row else None
+    try:
+        row = conn.execute(
+            """
+            SELECT amendment_text FROM prompt_amendments
+            WHERE active = TRUE
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+        ).fetchone()
+        return row["amendment_text"] if row else None
+    finally:
+        conn.close()
 
 
 def _get_active_amendment_row(conn) -> dict | None:
@@ -179,6 +182,9 @@ def _group_corrections(
         else:
             weight = 1.0
 
+        # A4: Boost weight for corrections with explicit user feedback
+        if c.get("user_feedback"):
+            weight *= 2.0
         weighted_counts[key] += weight
 
     return {
@@ -557,8 +563,8 @@ direct instructions to the extraction model."""
 
     client = _get_client()
     response = client.messages.create(
-        model=_HAIKU_MODEL,
-        max_tokens=2000,
+        model=_AMENDMENT_MODEL,
+        max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -571,6 +577,22 @@ direct instructions to the extraction model."""
     # Deactivate old amendments
     conn.execute("UPDATE prompt_amendments SET active = FALSE WHERE active = TRUE")
 
+    # A3: Parse A/B/C/D bucket classifications from amendment output
+    bucket_classifications = {}
+    for line in amendment_text.split("\n"):
+        line_stripped = line.strip()
+        for bucket in ["A", "B", "C", "D"]:
+            # Match patterns like "Bucket A:", "[A]", "A. PROMPT FIX", "A:"
+            if (line_stripped.startswith(f"Bucket {bucket}:")
+                    or line_stripped.startswith(f"[{bucket}]")
+                    or line_stripped.startswith(f"{bucket}. ")
+                    or line_stripped.startswith(f"{bucket}:")):
+                # Extract the pattern name if present
+                for pattern_key in actionable_groups:
+                    if pattern_key.lower() in line_stripped.lower():
+                        bucket_classifications[pattern_key] = bucket
+                        break
+
     # Build source_analysis JSON that stores the correction_ids and
     # patterns_addressed (since those columns don't exist on the table).
     source_analysis_json = json.dumps({
@@ -581,6 +603,7 @@ direct instructions to the extraction model."""
                            if k in actionable_groups},
         "effectiveness_snapshot": effectiveness_data,
         "staleness_snapshot": staleness_data,
+        "bucket_classifications": bucket_classifications,
     })
 
     # Insert new amendment
@@ -690,11 +713,40 @@ def update_contact_preference(
 
 
 # ---------------------------------------------------------------------------
+# Pass-specific amendment retrieval (A1)
+# ---------------------------------------------------------------------------
+
+
+def _get_amendment_for_pass(pass_name: str) -> str | None:
+    """Return the active amendment text filtered by target_pass, or None.
+
+    If the prompt_amendments table has a target_pass column, only return
+    amendments matching the requested pass. Falls back gracefully if the
+    column doesn't exist yet (pre-migration).
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT amendment_text FROM prompt_amendments
+            WHERE active = TRUE AND target_pass = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (pass_name,),
+        ).fetchone()
+        return row["amendment_text"] if row else None
+    except Exception:
+        # Column doesn't exist yet — fall back to global
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Build extraction context (amendment + per-contact prefs)
 # ---------------------------------------------------------------------------
 
 
-def build_extraction_context(conversation_id: str) -> str:
+def build_extraction_context(conversation_id: str, pass_name: str = "claims") -> str:
     """Build the amendment context string to prepend to extraction prompts.
 
     Combines:
@@ -705,6 +757,10 @@ def build_extraction_context(conversation_id: str) -> str:
     ----------
     conversation_id : str
         The conversation being extracted.
+    pass_name : str
+        Which extraction pass is requesting context ("triage", "claims",
+        "synthesis"). Used to filter amendments by target_pass when the
+        column exists.
 
     Returns
     -------
@@ -714,7 +770,8 @@ def build_extraction_context(conversation_id: str) -> str:
     parts: list[str] = []
 
     # --- Global amendment ---
-    amendment = get_active_amendment()
+    # Try pass-specific amendment first, fall back to global
+    amendment = _get_amendment_for_pass(pass_name) or get_active_amendment()
     if amendment:
         parts.append(
             "=== LEARNED EXTRACTION RULES ===\n"

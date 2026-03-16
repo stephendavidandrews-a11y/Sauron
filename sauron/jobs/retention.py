@@ -29,7 +29,17 @@ def run_retention():
         rows = conn.execute(
             """SELECT af.* FROM audio_files af
                WHERE af.storage_tier = 'hot'
-                 AND af.created_at < ?""",
+                 AND af.created_at < ?
+                 AND af.id NOT IN (
+                     SELECT DISTINCT vs.source_conversation_id
+                     FROM voice_samples vs
+                     WHERE vs.source_conversation_id IS NOT NULL
+                 )
+                 AND af.conversation_id NOT IN (
+                     SELECT DISTINCT vs.source_conversation_id
+                     FROM voice_samples vs
+                     WHERE vs.source_conversation_id IS NOT NULL
+                 )""",
             (cutoff,),
         ).fetchall()
 
@@ -38,6 +48,10 @@ def run_retention():
             return
 
         logger.info(f"Archiving {len(rows)} audio files older than {HOT_RETENTION_DAYS} days")
+        # Verify archive dir is on external drive (not boot SSD)
+        if str(ARCHIVE_DIR).startswith("/Volumes/") and not Path(str(ARCHIVE_DIR).split("/")[0:3]).exists():
+            logger.error("External drive not mounted at %s — skipping retention", ARCHIVE_DIR)
+            return
         ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
         for row in rows:
@@ -86,6 +100,11 @@ def _archive_file(conn, row):
         "INSERT INTO retention_log (id, audio_file_id, action) VALUES (?, ?, 'compressed')",
         (str(uuid.uuid4()), row["id"]),
     )
+
+    # Verify compression produced valid output
+    if not dest.exists() or dest.stat().st_size == 0:
+        logger.error(f"Compressed file missing or empty: {dest} — keeping original")
+        return
 
     # Delete original
     try:

@@ -141,7 +141,7 @@ def _replay_pending_object_routes(entity_id: str, networking_app_contact_id: str
 
 
 @router.get("")
-def list_contacts(limit: int = 500):
+def list_contacts(limit: int = Query(default=500, ge=1, le=1000)):
     """List all unified contacts with conversation counts."""
     conn = get_connection()
     try:
@@ -161,7 +161,7 @@ def list_contacts(limit: int = 500):
 
 
 @router.get("/search")
-def search_contacts(q: str = Query(..., min_length=1), limit: int = 20):
+def search_contacts(q: str = Query(..., min_length=1), limit: int = Query(default=20, ge=1, le=100)):
     """Search contacts by name or alias for entity linking.
 
     Returns confirmed contacts (with or without networking_app_contact_id)
@@ -272,8 +272,8 @@ def get_contact_connections(contact_id: str):
     try:
         rows = conn.execute(
             """SELECT * FROM graph_edges
-               WHERE (from_entity = ? AND from_type = 'person')
-                  OR (to_entity = ? AND to_type = 'person')
+               WHERE from_entity_id = ?
+                  OR to_entity_id = ?
                ORDER BY strength DESC""",
             (contact_id, contact_id),
         ).fetchall()

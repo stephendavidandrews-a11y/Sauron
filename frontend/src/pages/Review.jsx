@@ -497,8 +497,15 @@ function QuickPassView({ onExit, onMarkReviewed }) {
     );
   }
 
-  // Build render with conversation group headers
-  let claimFlatIdx = 0;
+  // Build flat index map: claimId -> index (precomputed, no mutation in render)
+  const claimIndexMap = {};
+  let _idx = 0;
+  for (const group of convGroups) {
+    for (const claim of group.claims) {
+      claimIndexMap[claim.id] = activeProposals.length + _idx;
+      _idx++;
+    }
+  }
 
   return (
     <div style={{ padding: '24px 0' }}>
@@ -549,7 +556,7 @@ function QuickPassView({ onExit, onMarkReviewed }) {
       )}
 
       {convGroups.map(group => {
-        const groupStartIdx = claimFlatIdx;
+        // groupStartIdx not needed — using precomputed claimIndexMap
         const allGroupTriaged = getConvTriageStatus(group.convId);
 
         const groupEl = (
@@ -573,7 +580,7 @@ function QuickPassView({ onExit, onMarkReviewed }) {
             <div style={{ border: `1px solid ${C.border}`, borderTop: 'none',
               borderRadius: '0 0 6px 6px', padding: '8px' }}>
               {group.claims.map(claim => {
-                const idx = activeProposals.length + claimFlatIdx++;
+                const idx = claimIndexMap[claim.id];
                 return (
                   <QuickPassClaimCard key={claim.id} claim={claim}
                     isFocused={idx === focusIdx}
@@ -1123,15 +1130,17 @@ export default function Review() {
     }
   };
 
+
+
   const loadData = () => {
     Promise.all([
-      api.conversations(100, 0).catch(() => []),
+      api.reviewQueue().catch(() => ({ actionable: [], recently_reviewed: [] })),
       api.queueCounts().catch(() => ({})),
       api.beliefStats().catch(() => null),
       api.learningDashboard().catch(() => null),
       api.pendingResyntheses().catch(() => []),
-    ]).then(([allData, counts, bStats, lData, proposals]) => {
-      const all = allData?.conversations || allData || [];
+    ]).then(([reviewData, counts, bStats, lData, proposals]) => {
+      const all = [...(reviewData.actionable || []), ...(reviewData.recently_reviewed || [])];
       setConversations(all);
       setQueueCounts(counts);
       if (bStats) setBeliefStats(bStats);
@@ -1310,10 +1319,10 @@ export default function Review() {
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {claimReview.map(c => (
-              <Link key={c.id} to={`/review/${c.id}`} style={rowStyle}
+              <div key={c.id} style={{ ...rowStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                 onMouseEnter={e => e.currentTarget.style.background = C.cardHover}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Link to={`/review/${c.id}`} style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, textDecoration: 'none' }}>
                   <StatusDot color={C.accent} />
                   <span style={{ color: C.text, fontSize: 14 }}>
                     {c.manual_note || c.title || (c.source + " capture")}
@@ -1322,11 +1331,11 @@ export default function Review() {
                   <span style={{ color: C.textDim, fontSize: 12 }}>
                     {c.episode_count || 0} episodes &middot; {c.claim_count || 0} claims
                   </span>
-                </div>
+                </Link>
                 <span style={{ color: C.textDim, fontSize: 12 }}>
                   {relativeTime(c.captured_at || c.created_at)}
                 </span>
-              </Link>
+              </div>
             ))}
           </div>
         </div>

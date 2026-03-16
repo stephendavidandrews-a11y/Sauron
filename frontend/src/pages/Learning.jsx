@@ -7,6 +7,7 @@ export default function Learning() {
   const [analyzing, setAnalyzing] = useState(false);
   const [editingAmendment, setEditingAmendment] = useState(null);
   const [editText, setEditText] = useState('');
+  const [statusMessage, setStatusMessage] = useState(null);
 
   const load = () => {
     api.learningDashboard()
@@ -24,10 +25,10 @@ export default function Learning() {
       if (result.status === 'generated') {
         load();
       } else {
-        alert(result.message || 'No changes needed');
+        setStatusMessage({ type: 'info', text: result.message || 'No changes needed' });
       }
     } catch (e) {
-      alert('Analysis failed: ' + e.message);
+      setStatusMessage({ type: 'error', text: 'Analysis failed: ' + e.message });
     } finally {
       setAnalyzing(false);
     }
@@ -38,7 +39,7 @@ export default function Learning() {
       await api.toggleAmendment(id, active);
       load();
     } catch (e) {
-      alert('Failed: ' + e.message);
+      setStatusMessage({ type: 'error', text: 'Toggle failed: ' + e.message });
     }
   };
 
@@ -48,7 +49,7 @@ export default function Learning() {
       setEditingAmendment(null);
       load();
     } catch (e) {
-      alert('Failed: ' + e.message);
+      setStatusMessage({ type: 'error', text: 'Save failed: ' + e.message });
     }
   };
 
@@ -59,6 +60,21 @@ export default function Learning() {
   if (!data) {
     return (
       <div className="py-12 text-center text-text-dim">
+      {statusMessage && (
+        <div style={{
+          padding: '10px 16px', borderRadius: 6, marginBottom: 16, fontSize: 13,
+          background: statusMessage.type === 'error' ? '#ef444420' : '#3b82f620',
+          border: `1px solid ${statusMessage.type === 'error' ? '#ef444444' : '#3b82f644'}`,
+          color: statusMessage.type === 'error' ? '#ef4444' : '#60a5fa',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>{statusMessage.text}</span>
+          <button onClick={() => setStatusMessage(null)}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 16 }}>
+            &times;
+          </button>
+        </div>
+      )}
         Failed to load learning data.
       </div>
     );

@@ -12,10 +12,22 @@ const C = {
 
 const speakerColors = ['#60a5fa', '#f472b6', '#34d399', '#fbbf24', '#a78bfa', '#fb923c'];
 
-function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCreateAndAssign, onMerge, allLabels, contacts, searchQuery, onSearchChange }) {
+function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCreateAndAssign, onMerge, allLabels }) {
   const [showAssign, setShowAssign] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+
+
+  // Local contact search per card
+  useEffect(() => {
+    if (searchQuery.length < 2) { setFilteredContacts([]); return; }
+    const timer = setTimeout(() => {
+      api.searchContacts(searchQuery, 10)
+        .then(data => { const all = data?.contacts || data || []; setFilteredContacts(all.filter(c => c.is_confirmed !== 0)); })
+        .catch(() => setFilteredContacts([]));
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
   const [createForm, setCreateForm] = useState({ name: '', organization: '', title: '', email: '', phone: '', aliases: '', notes: '', pushToCRM: true });
   const [creating, setCreating] = useState(false);
 
@@ -80,16 +92,16 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
             type="text"
             placeholder="Search contacts..."
             value={searchQuery}
-            onChange={e => onSearchChange(e.target.value)}
+            onChange={e => setSearchQuery(e.target.value)}
             style={{
               width: '100%', padding: '6px 8px', fontSize: 12,
               background: C.bg, color: C.text, border: `1px solid ${C.border}`,
               borderRadius: 4, outline: 'none', boxSizing: 'border-box',
             }}
           />
-          {contacts.length > 0 && (
+          {filteredContacts.length > 0 && (
             <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 4, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4 }}>
-              {contacts.map(c => (
+              {filteredContacts.map(c => (
                 <div key={c.id}
                   onClick={() => { onAssign(label, c.id); setShowAssign(false); }}
                   style={{
@@ -249,8 +261,7 @@ export default function SpeakerReview() {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filteredContacts, setFilteredContacts] = useState([]);
+
   const [playingLabel, setPlayingLabel] = useState(null);
   const audioRef = useRef(null);
 
@@ -274,16 +285,7 @@ export default function SpeakerReview() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Search contacts
-  useEffect(() => {
-    if (searchQuery.length < 2) { setFilteredContacts([]); return; }
-    const timer = setTimeout(() => {
-      api.searchContacts(searchQuery, 10)
-        .then(data => { const all = data?.contacts || data || []; setFilteredContacts(all.filter(c => c.is_confirmed !== 0)); })
-        .catch(() => setFilteredContacts([]));
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+
 
   // Get unique speaker labels
   const speakerLabels = [...new Set(transcripts.map(t => t.speaker_label).filter(Boolean))].sort();
@@ -319,8 +321,6 @@ export default function SpeakerReview() {
   const handleAssign = async (label, contactId) => {
     try {
       await api.correctSpeaker(id, label, contactId);
-      setSearchQuery('');
-      setFilteredContacts([]);
       loadData();
     } catch (e) {
       console.error('Failed to assign speaker:', e);
@@ -445,9 +445,6 @@ export default function SpeakerReview() {
             onCreateAndAssign={handleCreateAndAssign}
             onMerge={handleMerge}
             allLabels={speakerLabels}
-            contacts={filteredContacts}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
           />
         ))}
       </div>

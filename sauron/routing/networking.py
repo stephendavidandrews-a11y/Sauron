@@ -60,6 +60,7 @@ def route_to_networking_app(
     conversation_id: str,
     extraction: dict,
     networking_app_contact_id: str | None = None,
+    is_retry: bool = False,
 ) -> bool:
     """Route all relevant extraction data to the Networking App.
 
@@ -187,6 +188,7 @@ def route_to_networking_app(
         return _execute_routing(
             conversation_id, synthesis, claims,
             networking_app_contact_id, extraction, sel_conn,
+            is_retry=is_retry,
         )
     finally:
         sel_conn.close()
@@ -195,6 +197,7 @@ def route_to_networking_app(
 def _execute_routing(
     conversation_id, synthesis, claims,
     networking_app_contact_id, extraction, sel_conn,
+    is_retry=False,
 ):
     """Inner routing function with DB connection for synthesis_entity_links."""
     routing_attempt_id = str(uuid.uuid4())
@@ -286,17 +289,26 @@ def _execute_routing(
         if networking_app_contact_id:
             interaction_payload["contactId"] = networking_app_contact_id
 
-        ok, err, _resp = _api_call("POST", f"{NETWORKING_APP_URL}/api/interactions", interaction_payload)
         _created_interaction_id = None
-        if ok:
-            # Capture interaction ID for participant routing
-            if isinstance(_resp, dict):
-                _created_interaction_id = _resp.get("id")
-            successes.append(("interaction", interaction_payload))
-            core_lane_results.append({"name": "interaction", "status": "success"})
+        if not networking_app_contact_id and not _is_solo:
+            # No contactId resolved — skip to avoid NA FK constraint error
+            logger.info(
+                f"Skipping interaction for {conversation_id[:8]}: "
+                f"no primary contact resolved (text conversation without "
+                f"identifiable non-Stephen speaker)"
+            )
+            core_lane_results.append({"name": "interaction", "status": "skipped_no_contact"})
         else:
-            errors.append(("interaction", interaction_payload, err))
-            core_lane_results.append({"name": "interaction", "status": "failed", "error": err})
+            ok, err, _resp = _api_call("POST", f"{NETWORKING_APP_URL}/api/interactions", interaction_payload)
+            if ok:
+                # Capture interaction ID for participant routing
+                if isinstance(_resp, dict):
+                    _created_interaction_id = _resp.get("id")
+                successes.append(("interaction", interaction_payload))
+                core_lane_results.append({"name": "interaction", "status": "success"})
+            else:
+                errors.append(("interaction", interaction_payload, err))
+                core_lane_results.append({"name": "interaction", "status": "failed", "error": err})
     else:
         _created_interaction_id = None
         core_lane_results.append({"name": "interaction", "status": "skipped_solo"})
@@ -633,6 +645,17 @@ def _execute_routing(
             logger.debug(
                 f"Skipping self-referential edge {from_name} -> {to_name} "
                 f"(both resolve to {from_cid[:8]})"
+            )
+            continue
+        # Skip edges where resolved IDs aren't valid UUIDs (e.g., org seed IDs
+        # like 'seed-treasury' from entity_organizations). The NA's
+        # contact-relationships endpoint requires real contact UUIDs.
+        import re as _re
+        _UUID_RE = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+        if not _UUID_RE.match(from_cid) or not _UUID_RE.match(to_cid):
+            logger.debug(
+                f"Skipping graph_edge[{idx}] {from_name} -> {to_name}: "
+                f"non-UUID contact ID (from={from_cid[:16]}, to={to_cid[:16]})"
             )
             continue
         pair = sorted([from_name, to_name])
@@ -1162,12 +1185,16 @@ def _execute_routing(
             f"Routing FAILED for conversation {conversation_id[:8]} — "
             f"{len(errors)} error(s): {error_summary}"
         )
-        log_routing_failure(
-            conversation_id=conversation_id,
-            object_class="conversation_bundle",
-            payload=extraction,
-            error=error_summary[:500],
-        )
+        # Skip creating new routing_log entry on retry — retry.py manages
+        # the original entry's attempts/status. Creating a new entry here
+        # caused exponential duplication (each retry spawned a new entry).
+        if not is_retry:
+            log_routing_failure(
+                conversation_id=conversation_id,
+                object_class="conversation_bundle",
+                payload=extraction,
+                error=error_summary[:500],
+            )
         summary = RoutingSummary(
             conversation_id=conversation_id,
             routing_attempt_id=routing_attempt_id,
@@ -1183,8 +1210,10 @@ def _execute_routing(
         return False
 
     # All succeeded — log individual successes for audit trail
-    for obj_class, payload in successes:
-        log_routing_success(conversation_id, obj_class, payload)
+    # Skip logging on retry to avoid duplicate routing_log entries
+    if not is_retry:
+        for obj_class, payload in successes:
+            log_routing_success(conversation_id, obj_class, payload)
     logger.info(
         f"Routed conversation {conversation_id[:8]} — "
         f"{len(successes)} object(s) sent successfully"

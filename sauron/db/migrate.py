@@ -407,7 +407,11 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         # -- Step 26: v26 Unified Entities (non-person entity tracking) --
         _run_v26_unified_entities(conn)
 
+        # v27: Audit Wave 1 indexes
+        _run_v27_audit_indexes(conn)
+
         conn.commit()
+
         logger.info("[MIGRATION] All migrations complete.")
 
     except Exception:
@@ -1145,3 +1149,70 @@ if __name__ == "__main__":
     print(f"Running v5 migration on {DB_PATH} ...")
     run_migration()
     print("Done.")
+
+
+# ── v27: Audit Wave 1 — missing indexes + fix pending_routes index ──
+
+def _run_v27_audit_indexes(conn):
+    """Add missing indexes identified by system audit."""
+    logger.info("Running v27 migration (audit: missing indexes)...")
+
+    # Fix idx_pending_routes_status — was indexing released_at, should index status
+    try:
+        conn.execute("DROP INDEX IF EXISTS idx_pending_routes_status")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_routes_status ON pending_object_routes(status)")
+        logger.info("  Fixed idx_pending_routes_status → now indexes status column")
+    except Exception as e:
+        logger.debug("  idx_pending_routes_status fix: %s", e)
+
+    # New indexes for audit findings
+    new_indexes = [
+        ("idx_event_claims_review_status", "event_claims", "review_status"),
+        ("idx_event_claims_review_tier", "event_claims", "review_tier"),
+        ("idx_event_claims_due_date", "event_claims", "due_date"),
+        ("idx_conversations_modality", "conversations", "modality"),
+        ("idx_conversations_run_status", "conversations", "run_status"),
+        ("idx_graph_edges_source_conv", "graph_edges", "source_conversation_id"),
+        ("idx_graph_edges_from_entity_id", "graph_edges", "from_entity_id"),
+        ("idx_graph_edges_to_entity_id", "graph_edges", "to_entity_id"),
+    ]
+
+    for idx_name, table, column in new_indexes:
+        try:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({column})")
+        except Exception as e:
+            logger.debug("  Index %s: %s", idx_name, e)
+
+    # Add missing columns that schema.py now declares
+    from sauron.db.migrate import _add_column_safe
+    _add_column_safe(conn, "conversations", "modality", "TEXT DEFAULT 'voice'")
+    _add_column_safe(conn, "conversations", "current_stage", "TEXT DEFAULT 'ingest'")
+    _add_column_safe(conn, "conversations", "stage_detail", "TEXT")
+    _add_column_safe(conn, "conversations", "run_status", "TEXT DEFAULT 'active'")
+    _add_column_safe(conn, "conversations", "blocking_reason", "TEXT")
+    _add_column_safe(conn, "event_claims", "evidence_quality", "TEXT")
+    _add_column_safe(conn, "event_claims", "due_date", "TEXT")
+    _add_column_safe(conn, "event_claims", "date_confidence", "TEXT")
+    _add_column_safe(conn, "event_claims", "date_note", "TEXT")
+    _add_column_safe(conn, "event_claims", "condition_trigger", "TEXT")
+    _add_column_safe(conn, "event_claims", "recurrence", "TEXT")
+    _add_column_safe(conn, "event_claims", "related_claim_id", "TEXT")
+    _add_column_safe(conn, "event_claims", "review_tier", "TEXT")
+    _add_column_safe(conn, "event_claims", "subject_type", "TEXT DEFAULT 'person'")
+    _add_column_safe(conn, "unified_contacts", "source_conversation_id", "TEXT")
+    _add_column_safe(conn, "unified_contacts", "current_title", "TEXT")
+    _add_column_safe(conn, "unified_contacts", "current_organization", "TEXT")
+    _add_column_safe(conn, "unified_contacts", "title", "TEXT")
+    _add_column_safe(conn, "contact_affiliations_cache", "is_primary", "BOOLEAN DEFAULT 0")
+    _add_column_safe(conn, "prompt_amendments", "target_pass", "TEXT DEFAULT 'claims'")
+    _add_column_safe(conn, "graph_edges", "review_status", "TEXT")
+    _add_column_safe(conn, "graph_edges", "reviewed_at", "DATETIME")
+    _add_column_safe(conn, "graph_edges", "review_note", "TEXT")
+    _add_column_safe(conn, "graph_edges", "from_entity_id", "TEXT")
+    _add_column_safe(conn, "graph_edges", "from_entity_table", "TEXT")
+    _add_column_safe(conn, "graph_edges", "to_entity_id", "TEXT")
+    _add_column_safe(conn, "graph_edges", "to_entity_table", "TEXT")
+    _add_column_safe(conn, "claim_entities", "entity_table", "TEXT DEFAULT 'unified_contacts'")
+
+    conn.commit()
+    logger.info("v27 migration complete.")

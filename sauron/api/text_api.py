@@ -43,11 +43,9 @@ async def list_threads():
 @router.get("/pending-contacts")
 async def list_pending_contacts():
     """List contacts in the pending review queue."""
-    import sqlite3
-    from sauron.config import DB_PATH
+    from sauron.db.connection import get_connection
     try:
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
+        conn = get_connection()
         cursor = conn.execute(
             """SELECT id, phone, display_name, source, first_seen_at,
                       last_seen_at, message_count, thread_ids, status

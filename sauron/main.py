@@ -84,7 +84,9 @@ async def lifespan(app: FastAPI):
     _conn = _get_conn()
     try:
         _pending = _conn.execute(
-            "SELECT id FROM conversations WHERE processing_status = 'pending' ORDER BY captured_at"
+            "SELECT id FROM conversations WHERE processing_status IN "
+            "('pending', 'transcribing', 'triaging', 'extracting') "
+            "ORDER BY captured_at"
         ).fetchall()
     finally:
         _conn.close()
@@ -107,11 +109,11 @@ async def lifespan(app: FastAPI):
 
     # Start APScheduler for morning brief (graceful if not installed)
     try:
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
         from sauron.jobs.morning_email import run_morning_brief_job
 
-        _scheduler = AsyncIOScheduler()
+        _scheduler = BackgroundScheduler(daemon=True)
         _scheduler.add_job(
             run_morning_brief_job,
             CronTrigger(hour=6, minute=30),
@@ -183,7 +185,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

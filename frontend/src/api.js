@@ -12,6 +12,22 @@ async function fetchJSON(path, options = {}) {
   return res.json();
 }
 
+// Cached contacts (5-minute TTL) to avoid 500-contact fetch on every page load
+let _contactsCache = null;
+let _contactsCacheTime = 0;
+const CONTACTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCachedContacts(limit = 500) {
+  if (_contactsCache && (Date.now() - _contactsCacheTime) < CONTACTS_CACHE_TTL) {
+    return Promise.resolve(_contactsCache);
+  }
+  return fetchJSON(`/graph?limit=${limit}`).then(data => {
+    _contactsCache = data;
+    _contactsCacheTime = Date.now();
+    return data;
+  });
+}
+
 export const api = {
   // Health
   health: () => fetchJSON('/health'),
@@ -21,6 +37,7 @@ export const api = {
     fetchJSON(`/conversations?limit=${limit}&offset=${offset}`),
   conversation: (id) => fetchJSON(`/conversations/${id}`),
   needsReview: (limit = 50) => fetchJSON(`/conversations/needs-review?limit=${limit}`),
+  reviewQueue: () => fetchJSON('/conversations/review-queue'),
   markReviewed: (id) =>
     fetchJSON(`/conversations/${id}/review`, { method: 'POST' }),
 
@@ -52,7 +69,7 @@ export const api = {
 
   // Graph / Contacts
   graph: () => fetchJSON('/graph'),
-  contacts: (limit = 500) => fetchJSON(`/graph?limit=${limit}`),
+  contacts: (limit = 500) => getCachedContacts(limit),
   searchContacts: (q, limit = 20) =>
     fetchJSON(`/graph/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   syncContacts: () => fetchJSON('/graph/sync-contacts', { method: 'POST' }),
@@ -502,115 +519,75 @@ export const api = {
 };
 
 
-// Routing visibility (degraded-state)
+// Routing visibility
 export async function fetchRoutingSummary(conversationId) {
-  const res = await fetch(`/api/conversations/${conversationId}/routing-summary`);
-  if (!res.ok) return [];
-  return res.json();
+  try {
+    return await fetchJSON(`/conversations/${conversationId}/routing-summary`);
+  } catch { return []; }
 }
 
 export async function fetchPendingRoutes(by = "entity") {
-  const res = await fetch(`/api/routing/pending?by=${by}`);
-  if (!res.ok) return [];
-  return res.json();
+  try {
+    return await fetchJSON(`/routing/pending?by=${by}`);
+  } catch { return []; }
 }
 
 
 // ── Provisional Organization Review ──
 export async function fetchProvisionalOrgs(status = 'pending') {
-  const res = await fetch(`/api/provisional-orgs?status=${status}`);
-  if (!res.ok) throw new Error(`Failed to fetch provisional orgs: ${res.status}`);
-  return res.json();
+  return fetchJSON(`/provisional-orgs?status=${status}`);
 }
 
 export async function approveProvisionalOrg(suggestionId, parentOrganizationId = null) {
   const body = parentOrganizationId ? { parentOrganizationId } : {};
-  const res = await fetch(`/api/provisional-orgs/${suggestionId}/approve`, {
+  return fetchJSON(`/provisional-orgs/${suggestionId}/approve`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Approve failed: ${res.status} ${text}`);
-  }
-  return res.json();
 }
 
 export async function mergeProvisionalOrg(suggestionId, targetOrgId) {
-  const res = await fetch(`/api/provisional-orgs/${suggestionId}/merge`, {
+  return fetchJSON(`/provisional-orgs/${suggestionId}/merge`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ targetOrgId }),
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Merge failed: ${res.status} ${text}`);
-  }
-  return res.json();
 }
 
 export async function dismissProvisionalOrg(suggestionId) {
-  const res = await fetch(`/api/provisional-orgs/${suggestionId}/dismiss`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Dismiss failed: ${res.status} ${text}`);
-  }
-  return res.json();
+  return fetchJSON(`/provisional-orgs/${suggestionId}/dismiss`, { method: 'POST' });
 }
 
 export async function searchNetworkingOrgs(query) {
-  const res = await fetch(`/api/provisional-orgs/search-orgs?q=${encodeURIComponent(query)}`);
-  if (!res.ok) throw new Error(`Search failed: ${res.status}`);
-  return res.json();
+  return fetchJSON(`/provisional-orgs/search-orgs?q=${encodeURIComponent(query)}`);
 }
 
 
 
 // ── Graph Edge Editing API ──
 export async function fetchGraphEdges(conversationId) {
-  const res = await fetch(`/api/graph-edges/conversation/${conversationId}`);
-  if (!res.ok) return { edges: [], count: 0 };
-  return res.json();
+  try {
+    return await fetchJSON(`/graph-edges/conversation/${conversationId}`);
+  } catch { return { edges: [], count: 0 }; }
 }
 
 export async function updateGraphEdge(edgeId, updates) {
-  const res = await fetch(`/api/graph-edges/${edgeId}`, {
+  return fetchJSON(`/graph-edges/${edgeId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Update edge failed: ${res.status} ${text}`);
-  }
-  return res.json();
 }
 
 export async function confirmGraphEdge(edgeId) {
-  const res = await fetch(`/api/graph-edges/${edgeId}/confirm`, { method: 'POST' });
-  if (!res.ok) throw new Error('Confirm edge failed');
-  return res.json();
+  return fetchJSON(`/graph-edges/${edgeId}/confirm`, { method: 'POST' });
 }
 
 export async function dismissGraphEdge(edgeId) {
-  const res = await fetch(`/api/graph-edges/${edgeId}/dismiss`, { method: 'POST' });
-  if (!res.ok) throw new Error('Dismiss edge failed');
-  return res.json();
+  return fetchJSON(`/graph-edges/${edgeId}/dismiss`, { method: 'POST' });
 }
 
 export async function createGraphEdge(data) {
-  const res = await fetch('/api/graph-edges', {
+  return fetchJSON('/graph-edges', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Create edge failed: ${res.status} ${text}`);
-  }
-  return res.json();
 }

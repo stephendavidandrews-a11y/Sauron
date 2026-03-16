@@ -1,6 +1,8 @@
 """sauron/routing/provisional.py — Store provisional org suggestions for review."""
 import uuid
 import sqlite3
+
+from sauron.db.connection import get_connection
 import logging
 
 from sauron.config import DB_PATH
@@ -25,7 +27,7 @@ def store_provisional_org(
     """
     norm = (normalized_name or raw_name).lower().strip()
 
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = get_connection()
     try:
         existing = conn.execute(
             "SELECT id FROM provisional_org_suggestions WHERE normalized_name = ? AND conversation_id = ?",

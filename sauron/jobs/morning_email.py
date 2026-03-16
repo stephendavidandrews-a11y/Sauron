@@ -137,12 +137,9 @@ def _yesterday_range() -> tuple[str, str]:
 
 
 def _conversation_label(row: dict) -> str:
-    """Generate a display label for a conversation.
-
-    conversations has no 'title' column.  Use manual_note if available,
-    otherwise build a label from context_classification + source, or
-    fall back to the first 8 chars of the ID.
-    """
+    """Generate a display label for a conversation."""
+    if row.get("title"):
+        return row["title"]
     if row.get("manual_note"):
         return row["manual_note"]
     parts = []
@@ -159,7 +156,7 @@ def _get_yesterdays_conversations(conn) -> list[dict]:
     start, end = _yesterday_range()
     rows = conn.execute(
         """
-        SELECT id, manual_note, source, context_classification,
+        SELECT id, title, manual_note, source, context_classification,
                duration_seconds, processing_status, created_at
         FROM conversations
         WHERE created_at >= ? AND created_at <= ?

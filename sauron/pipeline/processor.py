@@ -213,13 +213,13 @@ def process_through_speaker_id(conversation_id: str) -> bool:
                     "SELECT title FROM conversations WHERE id = ?", (conversation_id,)
                 ).fetchone()
                 if not _title_check or not _title_check["title"]:
-                    from sauron.extraction.triage import generate_title_from_transcript
+                    # generate_title_from_transcript merged into generate_title
                     _transcript_segs = conn.execute(
                         "SELECT GROUP_CONCAT(text, ' ') as full_text FROM transcripts WHERE conversation_id = ?",
                         (conversation_id,),
                     ).fetchone()
                     if _transcript_segs and _transcript_segs["full_text"]:
-                        _title = generate_title_from_transcript(_transcript_segs["full_text"])
+                        _title = generate_title(transcript_text=_transcript_segs["full_text"])
                         if _title:
                             conn.execute(
                                 "UPDATE conversations SET title = ? WHERE id = ?",
@@ -446,7 +446,7 @@ def process_pending():
 def backfill_titles():
     """Backfill titles for conversations that have triage data or transcripts but no title."""
     import time
-    from sauron.extraction.triage import generate_title, generate_title_from_transcript
+    from sauron.extraction.triage import generate_title
     from sauron.extraction.schemas import TriageResult
 
     conn = get_connection()
@@ -484,9 +484,9 @@ def backfill_titles():
         try:
             if row["extraction_json"]:
                 triage_data = json.loads(row["extraction_json"])
-                title = generate_title(triage_data)
+                title = generate_title(triage_result=triage_data)
             elif row["transcript_text"]:
-                title = generate_title_from_transcript(row["transcript_text"])
+                title = generate_title(transcript_text=row["transcript_text"])
             else:
                 continue
             if title:
@@ -1063,7 +1063,7 @@ def _run_three_pass_extraction(
 
         # Generate conversation title from triage data
         try:
-            title = generate_title(triage)
+            title = generate_title(triage_result=triage)
             if title:
                 conn.execute(
                     "UPDATE conversations SET title = ? WHERE id = ?",
@@ -1667,18 +1667,6 @@ def _link_meeting_intentions(conn, conversation_id, speaker_map, extraction_resu
                     break
     except Exception:
         logger.exception("Intention linking failed (non-fatal)")
-
-
-# DEAD CODE: _run_routing() is never called. Routing fires only via
-# mark_reviewed() in review_actions.py -> route_extraction() in router.py.
-# Retained temporarily for reference; safe to delete in a future cleanup.
-def _run_routing(conversation_id: str, extraction: dict):
-    """Route extraction results to downstream apps."""
-    try:
-        from sauron.routing.router import route_extraction
-        route_extraction(conversation_id, extraction)
-    except Exception:
-        logger.exception("Routing failed (non-fatal)")
 
 
 def _run_embedding(conversation_id: str):

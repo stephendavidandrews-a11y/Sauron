@@ -4,7 +4,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -26,7 +26,7 @@ class TranscriptEdit(BaseModel):
 # ═══════════════════════════════════════════════════════
 
 @router.get("/needs-review")
-def list_needs_review(limit: int = 50):
+def list_needs_review(limit: int = Query(default=50, ge=1, le=500)):
     """List conversations that are completed but not yet reviewed."""
     conn = get_connection()
     try:
@@ -48,8 +48,8 @@ def list_needs_review(limit: int = 50):
 @router.get("")
 def list_conversations(
     status: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     """List processed conversations."""
     conn = get_connection()
@@ -67,6 +67,44 @@ def list_conversations(
 
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@router.get("/review-queue")
+def get_review_queue():
+    """Return all actionable conversations + 30 most recently reviewed.
+
+    This is the single endpoint the Review page needs — no client-side
+    filtering of hundreds of completed conversations.
+    """
+    conn = get_connection()
+    try:
+        # All non-completed, non-reviewed, non-discarded conversations
+        actionable = conn.execute(
+            """SELECT c.*,
+                  (SELECT COUNT(*) FROM event_episodes e WHERE e.conversation_id = c.id) as episode_count,
+                  (SELECT COUNT(*) FROM event_claims cl WHERE cl.conversation_id = c.id) as claim_count
+               FROM conversations c
+               WHERE c.processing_status NOT IN ('completed', 'reviewed', 'discarded', 'archived')
+               ORDER BY c.captured_at DESC"""
+        ).fetchall()
+
+        # 30 most recently reviewed (for "recently reviewed" section)
+        recently_reviewed = conn.execute(
+            """SELECT c.*,
+                  (SELECT COUNT(*) FROM event_episodes e WHERE e.conversation_id = c.id) as episode_count,
+                  (SELECT COUNT(*) FROM event_claims cl WHERE cl.conversation_id = c.id) as claim_count
+               FROM conversations c
+               WHERE c.processing_status = 'completed' AND c.reviewed_at IS NOT NULL
+               ORDER BY c.reviewed_at DESC
+               LIMIT 30"""
+        ).fetchall()
+
+        return {
+            "actionable": [dict(r) for r in actionable],
+            "recently_reviewed": [dict(r) for r in recently_reviewed],
+        }
     finally:
         conn.close()
 
@@ -116,7 +154,7 @@ def get_queue_counts():
 
 
 @router.get("/unreviewed-claims")
-def list_unreviewed_claims(limit: int = 50):
+def list_unreviewed_claims(limit: int = Query(default=50, ge=1, le=500)):
     """List unreviewed claims across all awaiting_claim_review conversations.
     Returns a flat list of claims with conversation context, ordered by
     recency then importance.
@@ -292,19 +330,17 @@ def edit_transcript(transcript_id: str, body: TranscriptEdit):
 # ═══════════════════════════════════════════════════════
 
 @router.post("/process-pending")
-def trigger_process_pending():
+def trigger_process_pending(background_tasks: BackgroundTasks):
     """Manually trigger processing of all pending conversations."""
-    process_pending()
-    return {"status": "ok", "message": "Processing triggered"}
+    background_tasks.add_task(process_pending)
+    return {"status": "ok", "message": "Processing triggered in background"}
 
 
 @router.post("/{conversation_id}/reprocess")
-def reprocess_conversation(conversation_id: str):
-    """Re-run extraction with updated prompt."""
-    success = process_conversation(conversation_id)
-    if not success:
-        raise HTTPException(status_code=500, detail="Reprocessing failed")
-    return {"status": "ok", "conversation_id": conversation_id}
+def reprocess_conversation(conversation_id: str, background_tasks: BackgroundTasks):
+    """Re-run extraction with updated prompt (runs in background)."""
+    background_tasks.add_task(process_conversation, conversation_id)
+    return {"status": "ok", "conversation_id": conversation_id, "message": "Reprocessing started in background"}
 
 
 

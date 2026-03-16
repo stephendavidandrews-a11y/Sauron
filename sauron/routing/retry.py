@@ -52,7 +52,7 @@ def retry_failed_routes_job():
             payload = json.loads(route["payload_json"]) if route["payload_json"] else {}
             cid = route["conversation_id"]
 
-            ok = route_to_networking_app(cid, payload)
+            ok = route_to_networking_app(cid, payload, is_retry=True)
             now = datetime.utcnow().isoformat()
 
             if ok:
@@ -69,8 +69,7 @@ def retry_failed_routes_job():
                 conn.commit()
                 success_count += 1
             else:
-                # route_to_networking_app already logged a new failure entry;
-                # bump attempts on the original entry
+                # Bump attempts on the original entry (no new entry created)
                 conn.execute(
                     """UPDATE routing_log
                        SET attempts = attempts + 1, last_attempt_at = ?

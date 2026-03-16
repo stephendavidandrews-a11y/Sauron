@@ -8,6 +8,8 @@ unified_contact), dismiss (ignore permanently), or defer (check later).
 import json
 import logging
 import sqlite3
+
+from sauron.db.connection import get_connection as _db_conn
 import uuid
 from datetime import datetime, timezone
 
@@ -17,10 +19,15 @@ logger = logging.getLogger(__name__)
 
 
 def _get_conn(db_path=None) -> sqlite3.Connection:
-    path = str(db_path or DB_PATH)
-    conn = sqlite3.connect(path, timeout=30)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Get a DB connection with FK/WAL/busy_timeout pragmas."""
+    if db_path:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
+    return _db_conn()
 
 
 def get_pending_contacts(db_path=None) -> list[dict]:

@@ -11,6 +11,7 @@ import Learning from './pages/Learning';
 import SpeakerReview from './pages/SpeakerReview';
 import BeliefReview from './pages/BeliefReview';
 import Upload from './pages/Upload';
+import ErrorBoundary from './components/ErrorBoundary';
 import { api } from './api';
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
     // Don't capture when typing in inputs
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.target.isContentEditable || e.target.getAttribute('role') === 'textbox') return;
 
     if (e.key === '/') {
       e.preventDefault();
@@ -62,6 +64,7 @@ export default function App() {
       />
 
       <main className="pt-14 px-4 md:px-8 max-w-6xl mx-auto">
+        <ErrorBoundary>
         <Routes>
           <Route path="/" element={<Today />} />
           <Route path="/prep" element={<Prep />} />
@@ -75,6 +78,7 @@ export default function App() {
           <Route path="/learning" element={<Learning />} />
           <Route path="/upload" element={<Upload />} />
         </Routes>
+        </ErrorBoundary>
       </main>
 
       <CommandPalette

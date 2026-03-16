@@ -88,7 +88,7 @@ def triage_conversation(
     Returns:
         (TriageResult with episodes, usage object)
     """
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(max_retries=2)
 
     system = TRIAGE_SYSTEM_PROMPT
     if amendment_context:
@@ -136,49 +136,73 @@ def should_run_deep_extraction(triage: TriageResult) -> bool:
     return True
 
 
-def generate_title(triage_result) -> str | None:
-    """Generate a concise 5-8 word conversation title using Haiku.
+def generate_title(
+    transcript_text: str | None = None,
+    triage_result=None,
+) -> str | None:
+    """Generate a concise 5-8 word conversation title.
+
+    Prefers transcript text (available earliest in pipeline). Enriches
+    with triage data when available. Falls back gracefully.
 
     Args:
-        triage_result: TriageResult or dict with summary, topic_tags,
-                       speaker_hints, episodes fields.
+        transcript_text: Raw transcript (will use first ~500 words).
+        triage_result: TriageResult or dict with summary/topics/episodes.
 
     Returns:
         Title string, or None on failure.
     """
-    # Build context for title generation
-    if hasattr(triage_result, "summary"):
-        summary = triage_result.summary
-        topics = getattr(triage_result, "topic_tags", []) or []
-        hints = getattr(triage_result, "speaker_hints", []) or []
-        episodes = getattr(triage_result, "episodes", []) or []
-    elif isinstance(triage_result, dict):
-        summary = triage_result.get("summary", "")
-        topics = triage_result.get("topic_tags", []) or []
-        hints = triage_result.get("speaker_hints", []) or []
-        episodes = triage_result.get("episodes", []) or []
-    else:
+    # Build context from whatever we have
+    context_parts = []
+
+    # Triage data enriches the prompt when available
+    if triage_result is not None:
+        if hasattr(triage_result, "summary"):
+            summary = triage_result.summary
+            topics = getattr(triage_result, "topic_tags", []) or []
+            hints = getattr(triage_result, "speaker_hints", []) or []
+            episodes = getattr(triage_result, "episodes", []) or []
+        elif isinstance(triage_result, dict):
+            summary = triage_result.get("summary", "")
+            topics = triage_result.get("topic_tags", []) or []
+            hints = triage_result.get("speaker_hints", []) or []
+            episodes = triage_result.get("episodes", []) or []
+        else:
+            summary = ""
+            topics = hints = episodes = []
+
+        if summary:
+            context_parts.append(f"Summary: {summary}")
+        if topics:
+            context_parts.append("Topics: " + ", ".join(topics[:5]))
+        if hints:
+            context_parts.append("Speakers: " + ", ".join(hints[:3]))
+
+        episode_titles = []
+        for ep in episodes[:2]:
+            if hasattr(ep, "title"):
+                episode_titles.append(ep.title)
+            elif isinstance(ep, dict):
+                episode_titles.append(ep.get("title", ""))
+        if episode_titles:
+            context_parts.append("Episodes: " + ", ".join(episode_titles))
+
+    # Transcript snippet — primary source, always available early
+    snippet = ""
+    if transcript_text and len(transcript_text.strip()) >= 20:
+        words = transcript_text.split()
+        snippet = " ".join(words[:500])
+        if len(words) > 500:
+            snippet += "..."
+        context_parts.append(f"Transcript excerpt:\n{snippet}")
+
+    if not context_parts:
         return None
-
-    episode_titles = []
-    for ep in episodes[:2]:
-        if hasattr(ep, "title"):
-            episode_titles.append(ep.title)
-        elif isinstance(ep, dict):
-            episode_titles.append(ep.get("title", ""))
-
-    context_parts = [f"Summary: {summary}"]
-    if topics:
-        context_parts.append("Topics: " + ", ".join(topics[:5]))
-    if hints:
-        context_parts.append("Speakers: " + ", ".join(hints[:3]))
-    if episode_titles:
-        context_parts.append("Episodes: " + ", ".join(episode_titles))
 
     context = "\n".join(context_parts)
 
     try:
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(max_retries=2)
         response = client.messages.create(
             model=TRIAGE_MODEL,
             max_tokens=30,
@@ -207,47 +231,3 @@ def generate_title(triage_result) -> str | None:
     except Exception as e:
         logger.warning(f"Title generation failed: {e}")
         return None
-
-
-def generate_title_from_transcript(transcript_text: str) -> str | None:
-    """Generate a title from raw transcript text when triage data isn't available.
-
-    Used for conversations still in speaker_review that haven't been triaged yet.
-
-    Args:
-        transcript_text: Raw transcript text (will be truncated to ~500 words).
-
-    Returns:
-        Title string, or None on failure.
-    """
-    if not transcript_text or len(transcript_text.strip()) < 20:
-        return None
-
-    # Take first ~500 words to keep token usage minimal
-    words = transcript_text.split()
-    snippet = ' '.join(words[:500])
-    if len(words) > 500:
-        snippet += '...'
-
-    try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model=TRIAGE_MODEL,
-            max_tokens=30,
-            messages=[{
-                "role": "user",
-                "content": f"""Generate a concise 5-8 word descriptive title for this conversation transcript.
-No quotes, no ending punctuation.
-Examples: 'Catherine on Dodd-Frank implementation timeline', 'Solo brainstorm on pipeline architecture', 'Quick check-in about weekend plans'
-
-Transcript:
-{snippet}"""
-            }],
-        )
-        title = response.content[0].text.strip().strip('"\'').rstrip('.')
-        logger.info(f"Generated title from transcript: {title}")
-        return title
-    except Exception as e:
-        logger.warning(f"Title generation from transcript failed: {e}")
-        return None
-

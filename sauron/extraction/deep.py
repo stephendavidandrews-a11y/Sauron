@@ -70,12 +70,6 @@ Output valid JSON matching this schema:
       "supporting_claim_ids": ["claim_001", "claim_003"]
     }
   ],
-  "self_coaching": [
-    {
-      "observation": "What Stephen did well or could improve — be specific with vocal/behavioral evidence",
-      "recommendation": "Specific actionable suggestion"
-    }
-  ],
   "graph_edges": [
     {
       "from_entity": "name or entity",
@@ -211,14 +205,12 @@ Output valid JSON matching this schema:
       "source_claim_id": "claim_xxx if traceable"
     }
   ],
-  "context_classification": "confirmed or refined classification"
 }
 
 Key instructions:
 - BELIEVE THE CLAIMS. They are already extracted and evidence-linked. Build on them, don't re-extract.
 - For vocal analysis: correlate specific vocal deviations with specific claims/moments.
 - Word-voice misalignment: when claims say "fine/good" but vocal data shows jitter/stress spikes, flag it clearly.
-- Self-coaching: analyze Stephen's talk-time ratio, question frequency, interruption patterns. Be specific.
 - Belief updates: determine if existing beliefs should be supported, refined, qualified, contradicted, or if new beliefs emerge.
 - Commitments: ONLY from claims of type "commitment". Include source_claim_id to link back. "We should..." is NOT a commitment.
 - Graph edges: build from relationship claims and observed connections. Include person↔topic, person↔org, not just person↔person.
@@ -288,7 +280,7 @@ def synthesize(
     Returns:
         (SynthesisResult, usage_dict)
     """
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(max_retries=2)
 
     system = SYNTHESIS_SYSTEM_PROMPT
     if amendment_context:
@@ -325,7 +317,7 @@ def synthesize(
         f"{len(result.my_commitments)} my commitments, "
         f"{len(result.contact_commitments)} their commitments, "
         f"{len(result.graph_edges)} graph edges, "
-        f"{len(result.self_coaching)} coaching notes"
+        f"{len(result.graph_edges)} graph edges total"
     )
 
     return result, usage
@@ -337,7 +329,7 @@ def solo_extract(
     amendment_context: str = "",
 ) -> tuple[SoloExtractionResult, dict]:
     """Run extraction on a solo capture (single speaker)."""
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(max_retries=2)
 
     system = SOLO_EXTRACTION_SYSTEM_PROMPT
     if amendment_context:

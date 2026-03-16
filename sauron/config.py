@@ -55,7 +55,7 @@ SUPPORTED_FORMATS = {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus"}
 
 # ── Claude API ──
 TRIAGE_MODEL = "claude-haiku-4-5-20251001"
-EXTRACTION_MODEL = "claude-opus-4-6"
+EXTRACTION_MODEL = "claude-sonnet-4-6"
 CLAIMS_MODEL = "claude-sonnet-4-6"
 
 # ── Embedding / Semantic Search ──

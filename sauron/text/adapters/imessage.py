@@ -175,7 +175,7 @@ class IMessageAdapter:
 
     def _connect(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(f"file:{self._path}?mode=ro", uri=True)
+            self._conn = sqlite3.connect(self._path)
             self._conn.execute("PRAGMA query_only = ON")
             self._conn.row_factory = sqlite3.Row
         return self._conn
@@ -273,6 +273,7 @@ class IMessageAdapter:
         - Thread type detection (1on1 vs group)
         """
         conn = self._connect()
+
         thread_participants = self._get_thread_participants(conn)
         display_names = self._get_chat_display_names(conn)
 

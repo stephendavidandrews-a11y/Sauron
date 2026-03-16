@@ -2,6 +2,8 @@
 import json
 import logging
 import sqlite3
+
+from sauron.db.connection import get_connection
 from datetime import datetime
 
 import httpx
@@ -54,7 +56,7 @@ TIMEOUT = 15.0
 
 
 def _get_conn():
-    return sqlite3.connect(str(DB_PATH), timeout=30)
+    return get_connection()
 
 
 # ── Models ──
@@ -76,7 +78,6 @@ def list_provisional_orgs(
 ):
     """List provisional org suggestions, grouped by normalized_name."""
     conn = _get_conn()
-    conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute("""
             SELECT p.*, c.captured_at as conversation_date
@@ -141,7 +142,6 @@ def search_networking_orgs(q: str = Query(..., min_length=1)):
 def get_provisional_org(suggestion_id: str):
     """Get a single provisional org suggestion."""
     conn = _get_conn()
-    conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
             "SELECT * FROM provisional_org_suggestions WHERE id = ?",
@@ -158,7 +158,6 @@ def get_provisional_org(suggestion_id: str):
 def approve_provisional_org(suggestion_id: str, body: ApproveRequest = ApproveRequest()):
     """Approve a provisional org: create it in Networking App."""
     conn = _get_conn()
-    conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
             "SELECT * FROM provisional_org_suggestions WHERE id = ?",
@@ -241,7 +240,6 @@ def approve_provisional_org(suggestion_id: str, body: ApproveRequest = ApproveRe
 def merge_provisional_org(suggestion_id: str, body: MergeRequest):
     """Merge a provisional org suggestion with an existing org."""
     conn = _get_conn()
-    conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
             "SELECT * FROM provisional_org_suggestions WHERE id = ?",
@@ -295,7 +293,6 @@ def merge_provisional_org(suggestion_id: str, body: MergeRequest):
 def dismiss_provisional_org(suggestion_id: str):
     """Dismiss a provisional org suggestion."""
     conn = _get_conn()
-    conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
             "SELECT * FROM provisional_org_suggestions WHERE id = ?",

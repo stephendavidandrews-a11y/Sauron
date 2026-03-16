@@ -569,6 +569,7 @@ export default function Prep() {
 
   // Brief state
   const [brief, setBrief] = useState(null);
+  const requestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -625,11 +626,13 @@ export default function Prep() {
 
   // Load brief by contact ID
   const loadBriefById = useCallback(async (contactId) => {
+    const reqId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     setShowAutocomplete(false);
     try {
       const data = await api.personBrief(contactId);
+      if (reqId !== requestIdRef.current) return; // stale request
       setBrief(data);
     } catch (err) {
       // Fallback: try to assemble from existing endpoints
@@ -646,11 +649,13 @@ export default function Prep() {
 
   // Load brief by name (URL param or Enter key)
   const loadBriefByName = useCallback(async (name) => {
+    const reqId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     setShowAutocomplete(false);
     try {
       const data = await api.personBriefByName(name);
+      if (reqId !== requestIdRef.current) return; // stale request
       setBrief(data);
     } catch {
       // Fallback: search contacts, pick best match, assemble from existing APIs

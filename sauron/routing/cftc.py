@@ -117,14 +117,14 @@ def _create_meeting(conversation_id: str, synthesis: dict):
         if resp.status_code < 300:
             logger.info("Created CFTC stakeholder meeting")
     except httpx.ConnectError:
-        pass
+        logger.warning("CFTC app not reachable — skipping")
     except Exception:
         logger.exception("Failed to create CFTC meeting")
 
 
 def _create_note(conversation_id: str, synthesis: dict):
     """Create a manager note from team conversation with vocal insights."""
-    coaching = synthesis.get("self_coaching", [])
+    coaching = []  # self_coaching removed
     vocal_summary = synthesis.get("vocal_intelligence_summary")
     alignment = synthesis.get("word_voice_alignment", "neutral")
 
@@ -155,7 +155,7 @@ def _create_note(conversation_id: str, synthesis: dict):
             timeout=TIMEOUT,
         )
     except httpx.ConnectError:
-        pass
+        logger.warning("CFTC app not reachable — skipping")
     except Exception:
         logger.exception("Failed to create CFTC note")
 
@@ -182,7 +182,7 @@ def _create_policy_signal(conversation_id: str, position: dict, context: str):
             timeout=TIMEOUT,
         )
     except httpx.ConnectError:
-        pass
+        logger.warning("CFTC app not reachable — skipping")
     except Exception:
         logger.exception("Failed to create policy signal")
 

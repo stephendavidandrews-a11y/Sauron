@@ -29,3 +29,7 @@ Thumbs.db
 *.pid
 temp_*.py
 *.bak
+.gitnexus
+eval_results.json
+patch_*.py
+eval_*.py

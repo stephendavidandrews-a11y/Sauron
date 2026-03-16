@@ -221,10 +221,6 @@ class BeliefUpdate(BaseModel):
     supporting_claim_ids: list[str] = Field(default_factory=list)
 
 
-class SelfCoaching(BaseModel):
-    observation: str
-    recommendation: str | None = None
-
 
 class GraphEdge(BaseModel):
     from_entity: str
@@ -406,7 +402,6 @@ class SynthesisResult(BaseModel):
     belief_updates: list[BeliefUpdate] = Field(default_factory=list)
 
     # Self-coaching
-    self_coaching: list[SelfCoaching] = Field(default_factory=list)
 
     # Graph edges
     graph_edges: list[GraphEdge] = Field(default_factory=list)
@@ -449,7 +444,6 @@ class SynthesisResult(BaseModel):
     )
 
     # Context classification (confirmed/refined from triage)
-    context_classification: str = "mixed"
 
 
 # ═══════════════════════════════════════════════════════════════
