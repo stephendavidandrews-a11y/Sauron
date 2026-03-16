@@ -14,7 +14,7 @@ export function AddClaimForm({ conversationId, episodeId, contacts, onCreated, o
   const [contactSearch, setContactSearch] = useState('');
 
   const filteredContacts = contacts.filter(c =>
-    c.display_name?.toLowerCase().includes(contactSearch.toLowerCase())
+    c.canonical_name?.toLowerCase().includes(contactSearch.toLowerCase())
   ).slice(0, 8);
 
   const handleSubmit = async () => {
@@ -86,14 +86,14 @@ export function AddClaimForm({ conversationId, episodeId, contacts, onCreated, o
                 borderRadius: 4, maxHeight: 150, overflowY: 'auto' }}>
                 {filteredContacts.map(c => (
                   <div key={c.id} onClick={() => {
-                    setSubjectName(c.display_name);
+                    setSubjectName(c.canonical_name);
                     setSubjectEntityId(c.id);
                     setContactSearch('');
                   }} style={{ padding: '4px 8px', cursor: 'pointer', fontSize: 12, color: C.text,
                     borderBottom: `1px solid ${C.border}` }}
                     onMouseEnter={e => e.target.style.background = C.accent + '20'}
                     onMouseLeave={e => e.target.style.background = 'transparent'}>
-                    {c.display_name}
+                    {c.canonical_name}
                   </div>
                 ))}
               </div>

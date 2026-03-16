@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../../api';
 import { C, cardStyle, claimTypeColors } from '../styles';
 import { ClaimRow } from '../claims/ClaimRow';
@@ -59,7 +59,7 @@ export function ClaimsTab({ claims: initialClaims, conversationId, contacts, upd
   const handleEdit = async (claim) => {
     try {
       await api.correctClaim(conversationId, claim.id, 'claim_text_edited', claim.claim_text, editText, null);
-      claim.claim_text = editText;
+      updateClaim(claim.id, { claim_text: editText, review_status: user_corrected, text_user_edited: true });
       setEditingClaim(null);
       setRelinkClaim(claim.id);
     } catch (e) { console.error('Edit failed', e); }
@@ -85,8 +85,7 @@ export function ClaimsTab({ claims: initialClaims, conversationId, contacts, upd
         });
       }
       if (result && result.text_updated && result.updated_text) {
-        claim.claim_text = result.updated_text;
-        claim.display_overrides = null;
+        updateClaim(claim.id, { claim_text: result.updated_text, display_overrides: null });
       }
       if (result && result.relational_ref) {
         const ref = result.relational_ref;
@@ -109,11 +108,9 @@ export function ClaimsTab({ claims: initialClaims, conversationId, contacts, upd
   const handleRemoveEntity = async (claim, entityLinkId) => {
     try {
       await api.removeEntityLink(entityLinkId);
-      if (claim.entities) {
-        claim.entities = claim.entities.filter(e => e.id !== entityLinkId);
-      }
-      const subjectEntities = (claim.entities || []).filter(e => e.role === 'subject');
-      const updates = { entities: [...(claim.entities || [])] };
+      const remainingEntities = (claim.entities || []).filter(e => e.id !== entityLinkId);
+      const subjectEntities = remainingEntities.filter(e => e.role === 'subject');
+      const updates = { entities: remainingEntities };
       if (subjectEntities.length === 0) {
         updates.subject_entity_id = null;
         updates.subject_name = '';

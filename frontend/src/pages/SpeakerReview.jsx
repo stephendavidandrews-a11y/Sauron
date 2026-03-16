@@ -16,6 +16,8 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
   const [showAssign, setShowAssign] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredContacts, setFilteredContacts] = useState([]);
 
 
   // Local contact search per card
@@ -92,7 +94,6 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
             type="text"
             placeholder="Search contacts..."
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
             style={{
               width: '100%', padding: '6px 8px', fontSize: 12,
               background: C.bg, color: C.text, border: `1px solid ${C.border}`,
@@ -343,8 +344,6 @@ export default function SpeakerReview() {
       throw new Error('A contact with that name already exists. Use Assign to link to an existing contact instead.');
     }
     await api.correctSpeaker(id, label, result.contact_id);
-    setSearchQuery('');
-    setFilteredContacts([]);
     loadData();
   };
 

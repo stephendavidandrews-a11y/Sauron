@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../../api';
 import { C, cardStyle, claimTypeColors } from '../styles';
 import { ClaimRow } from '../claims/ClaimRow';
@@ -135,8 +135,7 @@ export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, 
       }
       // If backend replaced ambiguous first-name refs with canonical name, update text
       if (result && result.text_updated && result.updated_text) {
-        claim.claim_text = result.updated_text;
-        claim.display_overrides = null;
+        updateClaim(claim.id, { claim_text: result.updated_text, display_overrides: null });
       }
       // If backend detected a relational reference, prompt to save relationship
       if (result && result.relational_ref) {
@@ -160,11 +159,9 @@ export function EpisodesTab({ episodes: initialEpisodes, claims: initialClaims, 
   const handleRemoveEntity = async (claim, entityLinkId) => {
     try {
       await api.removeEntityLink(entityLinkId);
-      if (claim.entities) {
-        claim.entities = claim.entities.filter(e => e.id !== entityLinkId);
-      }
-      const subjectEntities = (claim.entities || []).filter(e => e.role === 'subject');
-      const updates = { entities: [...(claim.entities || [])] };
+      const remainingEntities = (claim.entities || []).filter(e => e.id !== entityLinkId);
+      const subjectEntities = remainingEntities.filter(e => e.role === 'subject');
+      const updates = { entities: remainingEntities };
       if (subjectEntities.length === 0) {
         updates.subject_entity_id = null;
         updates.subject_name = '';

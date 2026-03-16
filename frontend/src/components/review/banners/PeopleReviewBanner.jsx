@@ -580,16 +580,7 @@ export function PeopleReviewBanner({
       {/* Skipped people */}
       {skippedPeople.map(renderPersonRow)}
 
-      {/* Text replace cascade */}
-      {textReplaceTarget && (
-          <TextReplaceCascade
-            conversationId={conversationId}
-            defaultFindText={textReplaceTarget.findText}
-            defaultReplaceWith={textReplaceTarget.replaceWith}
-            onComplete={() => { setTextReplaceTarget(null); if (onResolved) onResolved(); }}
-            onDismiss={() => setTextReplaceTarget(null)}
-          />
-        )}
+
 
       {/* Self at the bottom */}
       {selfPeople.map(person => (

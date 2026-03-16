@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { C, errorTypes } from '../styles';
 
 export function ErrorTypeDropdown({ claim, onSelect }) {
