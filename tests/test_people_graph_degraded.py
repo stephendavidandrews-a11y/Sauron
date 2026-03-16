@@ -57,6 +57,7 @@ def test_db_no_graph_types(tmp_path):
             claim_id TEXT,
             entity_id TEXT,
             entity_name TEXT,
+            entity_table TEXT DEFAULT 'unified_contacts',
             role TEXT DEFAULT 'subject',
             confidence REAL DEFAULT 0.8,
             link_source TEXT DEFAULT 'model'
@@ -70,7 +71,9 @@ def test_db_no_graph_types(tmp_path):
             original_name TEXT,
             resolved_entity_id TEXT,
             resolution_method TEXT,
-            link_source TEXT DEFAULT 'model'
+            confidence REAL,
+            link_source TEXT DEFAULT 'auto_synthesis',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         -- graph_edges WITHOUT from_type and to_type (simulates old/minimal schema)
         CREATE TABLE graph_edges (
@@ -134,11 +137,26 @@ def test_db_no_graph_types(tmp_path):
 
 @pytest.fixture
 def client(test_db_no_graph_types, monkeypatch):
-    """Create test client with patched DB path."""
-    monkeypatch.setattr("sauron.db.connection.DB_PATH", test_db_no_graph_types)
-    # Also patch the Path version if needed
+    """Create test client with patched DB connection."""
+    import sauron.db.connection as db_mod
     from pathlib import Path
+
+    def get_test_connection():
+        conn = sqlite3.connect(test_db_no_graph_types, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
+
+    monkeypatch.setattr(db_mod, "get_connection", get_test_connection)
     monkeypatch.setattr("sauron.config.DB_PATH", Path(test_db_no_graph_types))
+
+    # Patch all modules that import get_connection directly
+    import sauron.api.conversations as conv_mod
+    import sauron.api.people_endpoints as people_mod
+    monkeypatch.setattr(conv_mod, "get_connection", get_test_connection)
+    monkeypatch.setattr(people_mod, "get_connection", get_test_connection)
 
     from sauron.main import app
     return TestClient(app)

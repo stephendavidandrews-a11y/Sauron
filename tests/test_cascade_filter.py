@@ -42,6 +42,7 @@ def cascade_db(tmp_path):
             claim_id TEXT,
             entity_id TEXT,
             entity_name TEXT,
+            entity_table TEXT DEFAULT 'unified_contacts',
             role TEXT DEFAULT 'subject',
             confidence REAL,
             link_source TEXT,
@@ -57,10 +58,15 @@ def cascade_db(tmp_path):
         CREATE TABLE synthesis_entity_links (
             id TEXT PRIMARY KEY,
             conversation_id TEXT,
+            object_type TEXT,
+            object_index INTEGER,
+            field_name TEXT,
             original_name TEXT,
             resolved_entity_id TEXT,
-            link_source TEXT,
-            confidence REAL
+            resolution_method TEXT,
+            confidence REAL,
+            link_source TEXT DEFAULT 'auto_synthesis',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE correction_events (
             id TEXT PRIMARY KEY,

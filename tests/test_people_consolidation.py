@@ -40,16 +40,22 @@ def test_db(tmp_path):
             claim_id TEXT,
             entity_name TEXT,
             entity_id TEXT,
+            entity_table TEXT DEFAULT 'unified_contacts',
             role TEXT,
             link_source TEXT
         );
         CREATE TABLE synthesis_entity_links (
             id TEXT PRIMARY KEY,
             conversation_id TEXT,
+            object_type TEXT,
+            object_index INTEGER,
+            field_name TEXT,
             original_name TEXT,
             resolved_entity_id TEXT,
-            link_source TEXT,
-            confidence REAL
+            resolution_method TEXT,
+            confidence REAL,
+            link_source TEXT DEFAULT 'auto_synthesis',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE unified_contacts (
             id TEXT PRIMARY KEY,
@@ -73,8 +79,17 @@ def test_db(tmp_path):
         );
         CREATE TABLE graph_edges (
             id TEXT PRIMARY KEY,
-            from_entity TEXT,
-            to_entity TEXT
+            from_entity TEXT NOT NULL,
+            from_type TEXT NOT NULL DEFAULT '',
+            to_entity TEXT NOT NULL,
+            to_type TEXT NOT NULL DEFAULT '',
+            edge_type TEXT,
+            strength REAL DEFAULT 0.5,
+            source_conversation_id TEXT,
+            review_status TEXT,
+            from_entity_id TEXT,
+            to_entity_id TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE audio_files (
             id TEXT PRIMARY KEY,
@@ -104,6 +119,9 @@ def app_client(test_db, monkeypatch):
     # Patch both the module-level reference AND the local import in conversations.py
     monkeypatch.setattr(db_mod, "get_connection", get_test_connection)
     monkeypatch.setattr(conv_mod, "get_connection", get_test_connection)
+
+    import sauron.api.people_endpoints as people_mod
+    monkeypatch.setattr(people_mod, "get_connection", get_test_connection)
 
     from sauron.api.conversations import router
     from fastapi import FastAPI
