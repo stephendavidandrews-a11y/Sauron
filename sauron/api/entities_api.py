@@ -237,9 +237,33 @@ def update_entity(entity_id: str, update: EntityUpdate):
 
 @router.post("/{entity_id}/confirm")
 def confirm_entity(entity_id: str):
-    """Confirm a provisional entity."""
+    """Confirm a provisional entity. Handles virtual ge: IDs from graph_edges."""
     conn = get_connection()
     try:
+        # Handle virtual graph_edge entities (id starts with "ge:")
+        if entity_id.startswith("ge:"):
+            name = entity_id[3:]
+            # Check if already exists by name
+            existing = conn.execute(
+                "SELECT id FROM unified_entities WHERE LOWER(canonical_name) = LOWER(?)",
+                (name,),
+            ).fetchone()
+            if existing:
+                entity_id = existing["id"]
+            else:
+                # Create new entity and confirm it
+                entity_id = str(uuid.uuid4())
+                conn.execute(
+                    """INSERT INTO unified_entities
+                       (id, entity_type, canonical_name, is_confirmed,
+                        observation_count, created_at)
+                       VALUES (?, 'organization', ?, 1, 1, datetime('now'))""",
+                    (entity_id, name),
+                )
+                conn.commit()
+                logger.info(f"Created + confirmed entity '{name}' from graph_edge")
+                return {"status": "confirmed", "entity_id": entity_id, "created": True}
+
         row = conn.execute(
             "SELECT canonical_name, is_confirmed FROM unified_entities WHERE id = ?",
             (entity_id,),
@@ -280,6 +304,10 @@ def confirm_entity(entity_id: str):
 @router.post("/{entity_id}/dismiss")
 def dismiss_entity(entity_id: str):
     """Dismiss a provisional entity — removes claim links and deletes entity."""
+    # Virtual graph_edge entities — no DB row to delete, just ack
+    if entity_id.startswith("ge:"):
+        return {"status": "dismissed", "entity_id": entity_id}
+
     conn = get_connection()
     try:
         row = conn.execute(

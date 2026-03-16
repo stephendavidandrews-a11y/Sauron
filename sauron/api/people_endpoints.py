@@ -696,6 +696,54 @@ def get_conversation_entities(conversation_id: str):
             if d["id"] not in entities_map:
                 entities_map[d["id"]] = d
 
+        # Source 3: Non-person entities from graph_edges, matched by name or shown as provisional
+        ge_name_rows = conn.execute("""
+            SELECT DISTINCT ge_name, ge_type FROM (
+                SELECT ge.from_entity AS ge_name, ge.from_type AS ge_type
+                FROM graph_edges ge
+                WHERE ge.source_conversation_id = ?
+                  AND ge.from_type IS NOT NULL AND ge.from_type != 'person'
+                UNION
+                SELECT ge.to_entity AS ge_name, ge.to_type AS ge_type
+                FROM graph_edges ge
+                WHERE ge.source_conversation_id = ?
+                  AND ge.to_type IS NOT NULL AND ge.to_type != 'person'
+            )
+        """, (conversation_id, conversation_id)).fetchall()
+
+        seen_names = {e.get("canonical_name", "").lower() for e in entities_map.values()}
+        for ge_row in ge_name_rows:
+            name = (ge_row["ge_name"] or "").strip()
+            if not name or name.lower() in seen_names:
+                continue
+            # Try to match against unified_entities by canonical_name or alias
+            ue_row = conn.execute("""
+                SELECT id, entity_type, canonical_name, aliases,
+                       is_confirmed, observation_count, description
+                FROM unified_entities
+                WHERE LOWER(canonical_name) = LOWER(?)
+                LIMIT 1
+            """, (name,)).fetchone()
+            if ue_row:
+                d = dict(ue_row)
+                if d["id"] not in entities_map:
+                    entities_map[d["id"]] = d
+                    seen_names.add(d["canonical_name"].lower())
+            else:
+                # Surface as a virtual provisional entry (no DB row yet)
+                virtual_id = f"ge:{name}"
+                entities_map[virtual_id] = {
+                    "id": virtual_id,
+                    "entity_type": ge_row["ge_type"] or "organization",
+                    "canonical_name": name,
+                    "aliases": None,
+                    "is_confirmed": 0,
+                    "observation_count": 1,
+                    "description": None,
+                    "source": "graph_edge",
+                }
+                seen_names.add(name.lower())
+
         return list(entities_map.values())
     finally:
         conn.close()

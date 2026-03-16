@@ -268,20 +268,22 @@ SUBJECT_TYPE = """
 SUBJECT TYPE
 ═══════════════════════════════════════════════════════════════
 
-Determine whether the claim is primarily about a person, organization, legislation, or topic.
+CRITICAL — subject_type MUST be set correctly for every claim. Do NOT default everything to "person".
 
 subject_type: "person" | "organization" | "legislation" | "topic"
 
-Rules:
-- "person" (default): The claim describes a person's action, position, commitment, or state
+Ask: "Who or what is this claim FUNDAMENTALLY about?"
+
+- "person": The grammatical subject is a human individual
   e.g., "Will believes the bill will pass" → subject_type="person", subject_name="Will Simpson"
-- "legislation": The claim is fundamentally about a bill, law, regulation, or rule
-  e.g., "The GUARD Act won't make the markup" → subject_type="legislation", subject_name="GUARD Act"
-  e.g., "The Wyden-Durbin bill covers transportation" → subject_type="legislation", subject_name="Wyden-Durbin bill"
-- "organization": The claim is about an org's action, state, or policy
+- "organization": The grammatical subject is an org, agency, company, or institution
   e.g., "CFTC is restructuring the Division of Enforcement" → subject_type="organization", subject_name="CFTC"
   e.g., "Allstate is hiring a new government affairs lead" → subject_type="organization", subject_name="Allstate"
-- "topic": The claim is about a general topic, project, or event
+  e.g., "The SEC issued new guidance" → subject_type="organization", subject_name="SEC"
+- "legislation": The grammatical subject is a bill, law, regulation, or rule
+  e.g., "The GUARD Act won't make the markup" → subject_type="legislation", subject_name="GUARD Act"
+  e.g., "The Wyden-Durbin bill covers transportation" → subject_type="legislation", subject_name="Wyden-Durbin bill"
+- "topic": The grammatical subject is an event, project, or abstract concept
   e.g., "The Senate markup is scheduled for March 19" → subject_type="topic", subject_name="Senate markup"
   e.g., "DeFi regulation is stalling" → subject_type="topic", subject_name="DeFi regulation"
 
@@ -289,7 +291,9 @@ IMPORTANT: The speaker is ALWAYS captured in the "speaker" field regardless of s
 If Will Simpson reports "The GUARD Act won't make the markup":
   subject_type="legislation", subject_name="GUARD Act", speaker="Will Simpson"
 
-When uncertain between person and non-person, prefer person. Most claims are about people.
+Do NOT default to "person" when the claim is clearly about an org, law, or topic.
+When genuinely ambiguous (e.g., "Stephen said CFTC is restructuring"), the
+subject is CFTC (organization), not Stephen (person). Stephen is the speaker.
 """
 
 # ═══════════════════════════════════════════════════════════════
