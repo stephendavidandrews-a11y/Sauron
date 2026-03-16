@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { fetchTextPendingContacts, approveTextContact, dismissTextContact, deferTextContact, triggerTextSync, fetchTextStatus } from '../api';
 
 export const C = {
   bg: '#0a0f1a', card: '#111827', border: '#1f2937',
@@ -249,6 +250,7 @@ export default function Search() {
 
       {/* Admin: Contact Sync (preserved) */}
       <ContactSyncPanel />
+      <PendingTextContactsPanel />
     </div>
   );
 }
@@ -811,6 +813,371 @@ function BeliefsBrowse({ navigate }) {
 
 
 // ═══════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════
+// PENDING TEXT CONTACTS PANEL — approve/dismiss unknown senders
+// ═══════════════════════════════════════════════════════
+function PendingTextContactsPanel() {
+  const [open, setOpen] = useState(false);
+  const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [approveForm, setApproveForm] = useState(null); // { id, phone, display_name }
+  const [formData, setFormData] = useState({ name: '', organization: '', title: '', email: '' });
+  const [actionResult, setActionResult] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [pipelineStatus, setPipelineStatus] = useState(null);
+  const [showDeferred, setShowDeferred] = useState(false);
+
+  const loadContacts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchTextPendingContacts();
+      setContacts(data || []);
+    } catch (e) {
+      console.error('Failed to load pending contacts:', e);
+    }
+    setLoading(false);
+  }, []);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const s = await fetchTextStatus();
+      setPipelineStatus(s);
+    } catch (e) {
+      console.error('Failed to load text status:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open && contacts.length === 0) {
+      loadContacts();
+      loadStatus();
+    }
+  }, [open, loadContacts, loadStatus, contacts.length]);
+
+  const handleApprove = async () => {
+    if (!formData.name.trim()) return;
+    try {
+      const result = await approveTextContact(approveForm.id, {
+        name: formData.name.trim(),
+        organization: formData.organization.trim() || null,
+        title: formData.title.trim() || null,
+        email: formData.email.trim() || null,
+      });
+      setActionResult({ type: 'success', text: `Approved: ${result.name} (${result.phone})` });
+      setApproveForm(null);
+      setFormData({ name: '', organization: '', title: '', email: '' });
+      loadContacts();
+    } catch (e) {
+      setActionResult({ type: 'error', text: `Approve failed: ${e.message}` });
+    }
+  };
+
+  const handleDismiss = async (id) => {
+    try {
+      await dismissTextContact(id);
+      setActionResult({ type: 'success', text: 'Contact dismissed' });
+      loadContacts();
+    } catch (e) {
+      setActionResult({ type: 'error', text: `Dismiss failed: ${e.message}` });
+    }
+  };
+
+  const handleDefer = async (id) => {
+    try {
+      await deferTextContact(id);
+      setActionResult({ type: 'success', text: 'Contact deferred' });
+      loadContacts();
+    } catch (e) {
+      setActionResult({ type: 'error', text: `Defer failed: ${e.message}` });
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const result = await triggerTextSync(false);
+      setSyncResult({ type: 'success', text: 'Sync started. New threads will be processed within ~30s.' });
+      // Refresh status after a short delay
+      setTimeout(() => loadStatus(), 5000);
+    } catch (e) {
+      setSyncResult({ type: 'error', text: `Sync failed: ${e.message}` });
+    }
+    setSyncing(false);
+  };
+
+  const pendingContacts = contacts.filter(c => c.status === 'pending');
+  const deferredContacts = contacts.filter(c => c.status === 'deferred');
+  const phoneContacts = pendingContacts.filter(c => c.phone && c.phone.length > 0);
+  const extractionContacts = pendingContacts.filter(c => !c.phone || c.phone.length === 0);
+
+  return (
+    <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16, marginTop: 16 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, background: 'none',
+          border: 'none', cursor: 'pointer', padding: 0, color: C.dim,
+        }}>
+        <span style={{ fontSize: 10 }}>{open ? '\u25BC' : '\u25B6'}</span>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+          Text Pipeline
+        </span>
+        {pendingContacts.length > 0 && (
+          <span style={{
+            fontSize: 10, padding: '1px 6px', borderRadius: 8,
+            background: '#f59e0b33', color: '#f59e0b', fontWeight: 600,
+          }}>{pendingContacts.length}</span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 16 }}>
+          {/* Pipeline Health Bar */}
+          {pipelineStatus && (
+            <div style={{
+              background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: '12px 16px', marginBottom: 12,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontSize: 12,
+            }}>
+              <div style={{ display: 'flex', gap: 16, color: C.muted }}>
+                <span>
+                  <span style={{ color: pipelineStatus.sync?.status === 'ok' ? '#10b981' : pipelineStatus.sync?.status === 'warning' ? '#f59e0b' : '#ef4444', marginRight: 4 }}>\u25CF</span>
+                  {pipelineStatus.sync?.detail || 'Unknown'}
+                </span>
+                <span>{pipelineStatus.ingest?.total_messages || 0} messages</span>
+                <span>{pipelineStatus.threads?.total_threads || 0} threads</span>
+                <span>{pipelineStatus.threads?.whitelisted || 0} whitelisted</span>
+              </div>
+              <button onClick={handleSync} disabled={syncing}
+                style={{
+                  fontSize: 11, padding: '4px 10px', borderRadius: 4,
+                  border: `1px solid ${C.accent}44`, cursor: syncing ? 'default' : 'pointer',
+                  background: syncing ? 'transparent' : C.accent + '18',
+                  color: C.accent, opacity: syncing ? 0.6 : 1,
+                }}>
+                {syncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            </div>
+          )}
+
+          {syncResult && (
+            <div style={{
+              padding: '8px 12px', borderRadius: 6, fontSize: 12, marginBottom: 12,
+              background: syncResult.type === 'success' ? '#10b98112' : '#ef444412',
+              border: `1px solid ${syncResult.type === 'success' ? '#10b98133' : '#ef444433'}`,
+              color: syncResult.type === 'success' ? '#10b981' : '#ef4444',
+            }}>{syncResult.text}</div>
+          )}
+
+          {actionResult && (
+            <div style={{
+              padding: '8px 12px', borderRadius: 6, fontSize: 12, marginBottom: 12,
+              background: actionResult.type === 'success' ? '#10b98112' : '#ef444412',
+              border: `1px solid ${actionResult.type === 'success' ? '#10b98133' : '#ef444433'}`,
+              color: actionResult.type === 'success' ? '#10b981' : '#ef4444',
+            }}>{actionResult.text}</div>
+          )}
+
+          {/* Pending Contacts List */}
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: C.muted, margin: 0 }}>
+                Pending Text Contacts
+                {phoneContacts.length > 0 && (
+                  <span style={{ fontSize: 12, fontWeight: 400, color: C.dim, marginLeft: 8 }}>
+                    {phoneContacts.length} phone-based
+                    {extractionContacts.length > 0 && `, ${extractionContacts.length} extraction-based`}
+                  </span>
+                )}
+              </h3>
+              <button onClick={loadContacts} disabled={loading}
+                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.border}`,
+                  background: 'transparent', color: C.dim, cursor: 'pointer' }}>
+                {loading ? '...' : 'Refresh'}
+              </button>
+            </div>
+
+            <p style={{ fontSize: 12, color: C.dim, marginBottom: 12, marginTop: 0 }}>
+              Unknown phone numbers from iMessage threads. Approve to whitelist their threads for intelligence extraction.
+            </p>
+
+            {loading && <div style={{ padding: 12, textAlign: 'center', color: C.dim, fontSize: 13 }}>Loading...</div>}
+
+            {!loading && phoneContacts.length === 0 && (
+              <div style={{ padding: 12, textAlign: 'center', color: C.dim, fontSize: 13 }}>
+                No pending contacts to review.
+              </div>
+            )}
+
+            {!loading && phoneContacts.map(contact => (
+              <div key={contact.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 12px', borderRadius: 6, marginBottom: 4,
+                background: approveForm?.id === contact.id ? '#1e293b' : 'transparent',
+                border: approveForm?.id === contact.id ? `1px solid ${C.accent}44` : '1px solid transparent',
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: C.accent, fontSize: 13, fontFamily: 'monospace' }}>{contact.phone}</span>
+                    {contact.display_name && (
+                      <span style={{ color: C.muted, fontSize: 12 }}>({contact.display_name})</span>
+                    )}
+                    <span style={{ color: C.dim, fontSize: 11 }}>
+                      {contact.message_count} msg{contact.message_count !== 1 ? 's' : ''}
+                    </span>
+                    {contact.thread_ids && (
+                      <span style={{ color: C.dim, fontSize: 11 }}>
+                        in {JSON.parse(contact.thread_ids).length} thread{JSON.parse(contact.thread_ids).length !== 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Approve form (inline) */}
+                  {approveForm?.id === contact.id && (
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text" placeholder="Full name *" value={formData.name}
+                          onChange={e => setFormData(d => ({ ...d, name: e.target.value }))}
+                          autoFocus
+                          onKeyDown={e => { if (e.key === 'Enter' && formData.name.trim()) handleApprove(); if (e.key === 'Escape') setApproveForm(null); }}
+                          style={{
+                            flex: 1, padding: '6px 10px', borderRadius: 4, fontSize: 13,
+                            background: '#0f172a', border: `1px solid ${C.border}`, color: C.text,
+                            outline: 'none',
+                          }}
+                        />
+                        <input
+                          type="text" placeholder="Organization" value={formData.organization}
+                          onChange={e => setFormData(d => ({ ...d, organization: e.target.value }))}
+                          style={{
+                            flex: 1, padding: '6px 10px', borderRadius: 4, fontSize: 13,
+                            background: '#0f172a', border: `1px solid ${C.border}`, color: C.text,
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={handleApprove} disabled={!formData.name.trim()}
+                          style={{
+                            fontSize: 12, padding: '5px 12px', borderRadius: 4,
+                            border: 'none', cursor: formData.name.trim() ? 'pointer' : 'default',
+                            background: formData.name.trim() ? '#10b981' : '#10b98144',
+                            color: 'white', fontWeight: 600,
+                          }}>
+                          Approve
+                        </button>
+                        <button onClick={() => { setApproveForm(null); setFormData({ name: '', organization: '', title: '', email: '' }); }}
+                          style={{
+                            fontSize: 12, padding: '5px 12px', borderRadius: 4,
+                            border: `1px solid ${C.border}`, background: 'transparent',
+                            color: C.dim, cursor: 'pointer',
+                          }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                {approveForm?.id !== contact.id && (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button onClick={() => {
+                      setApproveForm(contact);
+                      setFormData({ name: contact.display_name || '', organization: '', title: '', email: '' });
+                      setActionResult(null);
+                    }}
+                      style={{
+                        fontSize: 11, padding: '4px 10px', borderRadius: 4,
+                        border: `1px solid #10b98144`, background: '#10b98112',
+                        color: '#10b981', cursor: 'pointer',
+                      }}>
+                      Approve
+                    </button>
+                    <button onClick={() => handleDefer(contact.id)}
+                      style={{
+                        fontSize: 11, padding: '4px 10px', borderRadius: 4,
+                        border: `1px solid ${C.border}`, background: 'transparent',
+                        color: C.dim, cursor: 'pointer',
+                      }}>
+                      Defer
+                    </button>
+                    <button onClick={() => { if (window.confirm(`Dismiss ${contact.phone}? This contact will be permanently ignored.`)) handleDismiss(contact.id); }}
+                      style={{
+                        fontSize: 11, padding: '4px 10px', borderRadius: 4,
+                        border: `1px solid #ef444433`, background: 'transparent',
+                        color: '#ef4444', cursor: 'pointer', opacity: 0.7,
+                      }}>
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Deferred section */}
+            {deferredContacts.length > 0 && (
+              <div style={{ marginTop: 12, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+                <button onClick={() => setShowDeferred(!showDeferred)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, background: 'none',
+                    border: 'none', cursor: 'pointer', padding: 0, color: C.dim, fontSize: 12,
+                  }}>
+                  <span style={{ fontSize: 9 }}>{showDeferred ? '\u25BC' : '\u25B6'}</span>
+                  {deferredContacts.length} deferred contact{deferredContacts.length !== 1 ? 's' : ''}
+                </button>
+                {showDeferred && deferredContacts.map(contact => (
+                  <div key={contact.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 12px', marginTop: 4, borderRadius: 6, opacity: 0.6,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: C.dim, fontSize: 13, fontFamily: 'monospace' }}>{contact.phone}</span>
+                      {contact.display_name && (
+                        <span style={{ color: C.dim, fontSize: 12 }}>({contact.display_name})</span>
+                      )}
+                      <span style={{ color: C.dim, fontSize: 11 }}>{contact.message_count} msgs</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => {
+                        setApproveForm(contact);
+                        setFormData({ name: contact.display_name || '', organization: '', title: '', email: '' });
+                      }}
+                        style={{
+                          fontSize: 11, padding: '3px 8px', borderRadius: 4,
+                          border: `1px solid #10b98144`, background: '#10b98112',
+                          color: '#10b981', cursor: 'pointer',
+                        }}>
+                        Approve
+                      </button>
+                      <button onClick={() => { if (window.confirm(`Dismiss ${contact.phone}?`)) handleDismiss(contact.id); }}
+                        style={{
+                          fontSize: 11, padding: '3px 8px', borderRadius: 4,
+                          border: `1px solid #ef444433`, background: 'transparent',
+                          color: '#ef4444', cursor: 'pointer', opacity: 0.7,
+                        }}>
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // CONTACT SYNC PANEL — collapsible admin area (preserved)
 // ═══════════════════════════════════════════════════════
 function ContactSyncPanel() {

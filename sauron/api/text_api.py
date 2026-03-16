@@ -86,22 +86,24 @@ async def trigger_text_sync(dry_run: bool = False):
 
 
 @router.post("/pending-contacts/{pending_id}/approve")
-async def approve_contact(
-    pending_id: str,
-    name: str,
-    organization: str | None = None,
-    title: str | None = None,
-    email: str | None = None,
-):
-    """Approve a pending contact and create a unified_contact."""
+async def approve_contact(pending_id: str, body: dict):
+    """Approve a pending contact and create a unified_contact.
+
+    Body JSON: {"name": "...", "organization": "...", "title": "...", "email": "..."}
+    Only 'name' is required.
+    """
     from sauron.text.pending_contacts import approve_pending_contact
+
+    name = body.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
 
     try:
         result = approve_pending_contact(
             pending_id, name,
-            organization=organization,
-            title=title,
-            email=email,
+            organization=body.get("organization"),
+            title=body.get("title"),
+            email=body.get("email"),
         )
         if "error" in result:
             raise HTTPException(status_code=404, detail=result["error"])

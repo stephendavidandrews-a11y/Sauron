@@ -77,7 +77,7 @@ def approve_pending_contact(
         if not pending:
             return {"error": f"Pending contact {pending_id} not found"}
 
-        if pending["status"] != "pending":
+        if pending["status"] not in ("pending", "deferred"):
             return {"error": f"Contact already {pending['status']}"}
 
         # Create unified_contact
@@ -133,7 +133,7 @@ def dismiss_pending_contact(pending_id: str, db_path=None) -> dict:
         conn.execute("""
             UPDATE pending_contacts
             SET status = 'dismissed', reviewed_at = ?
-            WHERE id = ? AND status = 'pending'
+            WHERE id = ? AND status IN ('pending', 'deferred')
         """, (now_iso, pending_id))
         conn.commit()
 
