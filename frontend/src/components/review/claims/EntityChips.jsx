@@ -58,7 +58,7 @@ export function EntityChips({ claim, contacts, onLink, onRemoveEntity, conversat
                   <button onClick={(e) => { e.stopPropagation(); onRemoveEntity(claim, ent.id); }}
                     style={{ fontSize: 9, color: C.textDim, cursor: 'pointer', background: 'none',
                       border: 'none', padding: '0 2px', lineHeight: 1 }}
-                    title="Remove entity link">&times;</button>
+                    title="Remove entity link" aria-label="Remove entity link">&times;</button>
                 )}
               </span>
             );
@@ -78,7 +78,7 @@ export function EntityChips({ claim, contacts, onLink, onRemoveEntity, conversat
         style={{ fontSize: 11, padding: '1px 5px', borderRadius: 3,
           border: `1px solid ${C.border}`, background: 'transparent',
           color: C.textDim, cursor: 'pointer', lineHeight: 1 }}
-        title="Add entity link">+</button>
+        title="Add entity link" aria-label="Add entity link">+</button>
 
       {/* Search dropdown */}
       {showAdd && (

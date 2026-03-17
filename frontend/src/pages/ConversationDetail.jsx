@@ -12,6 +12,7 @@ import { PeopleReviewBanner } from '../components/review/banners/PeopleReviewBan
 import { ObjectsReviewBanner } from '../components/review/banners/ObjectsReviewBanner';
 import { RelationalReferencesBanner } from '../components/review/banners/RelationalReferencesBanner';
 import { GraphEdgeReviewBanner } from '../components/review/banners/GraphEdgeReviewBanner';
+import { ErrorBoundary } from '../components/review/ErrorBoundary';
 import { RoutingPreview } from '../components/review/banners/RoutingPreview';
 import { BulkReassignModal } from '../components/review/BulkReassignModal';
 
@@ -293,7 +294,7 @@ export default function ConversationDetail() {
             </button>
           )}
           <button onClick={() => setTextReplaceTarget({ findText: '', replaceWith: '' })}
-            style={{ padding: '8px 16px', background: '#6b7280', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
+            aria-label="Fix text in transcript" style={{ padding: '8px 16px', background: '#6b7280', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
             Fix Text
           </button>
         </div>
@@ -330,7 +331,7 @@ export default function ConversationDetail() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span style={{ color: C.danger, fontSize: 13, fontWeight: 500 }}>{actionError}</span>
-          <button onClick={() => setActionError(null)} style={{
+          <button onClick={() => setActionError(null)} aria-label="Dismiss error" style={{
             background: 'none', border: 'none', color: C.danger, cursor: 'pointer',
             fontSize: 16, padding: '0 4px', lineHeight: 1,
           }}>{'\u2715'}</button>
@@ -338,19 +339,19 @@ export default function ConversationDetail() {
       )}
 
       {/* Layer 1: People resolution */}
-      <PeopleReviewBanner key={`people-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} onPeopleLoaded={setPeopleStatus} pendingEntities={pendingEntities} textReplaceTarget={textReplaceTarget} setTextReplaceTarget={setTextReplaceTarget} />
+      <ErrorBoundary label="People Review"><PeopleReviewBanner key={`people-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} onPeopleLoaded={setPeopleStatus} pendingEntities={pendingEntities} textReplaceTarget={textReplaceTarget} setTextReplaceTarget={setTextReplaceTarget} /></ErrorBoundary>
 
       {/* Layer 1.5: Non-person entities (orgs, legislation, topics) */}
-      <ObjectsReviewBanner key={`objects-${refreshKey}`} conversationId={id} onResolved={reload} />
+      <ErrorBoundary label="Objects Review"><ObjectsReviewBanner key={`objects-${refreshKey}`} conversationId={id} onResolved={reload} /></ErrorBoundary>
 
       {/* Layer 2: Relational references (unchanged) */}
-      <RelationalReferencesBanner key={`rel-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} />
+      <ErrorBoundary label="Relational References"><RelationalReferencesBanner key={`rel-${refreshKey}`} conversationId={id} contacts={contactsList} onResolved={reload} /></ErrorBoundary>
 
       {/* Layer 3: Graph edge review */}
-      <GraphEdgeReviewBanner key={`edges-${refreshKey}`} conversationId={id} refreshKey={refreshKey} />
+      <ErrorBoundary label="Graph Edges"><GraphEdgeReviewBanner key={`edges-${refreshKey}`} conversationId={id} refreshKey={refreshKey} /></ErrorBoundary>
 
       {/* Layer 4: Routing preview */}
-      <RoutingPreview key={`routing-${refreshKey}`} conversationId={id} refreshKey={refreshKey} />
+      <ErrorBoundary label="Routing Preview"><RoutingPreview key={`routing-${refreshKey}`} conversationId={id} refreshKey={refreshKey} /></ErrorBoundary>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
@@ -363,11 +364,11 @@ export default function ConversationDetail() {
         ))}
       </div>
 
-      {tab === 'episodes' && <EpisodesTab episodes={episodes} claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} addClaimToState={addClaimToState} onActionError={handleActionError} />}
-      {tab === 'transcript' && <TranscriptTab transcript={transcript} conversationId={id} contacts={contactsList} />}
-      {tab === 'claims' && <ClaimsTab claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} onActionError={handleActionError} />}
-      {tab === 'summary' && <SummaryTab synthesis={synthesis} beliefUpdates={beliefUpdates} claims={claims} />}
-      {tab === 'raw' && <RawTab extraction={parsedExtraction} />}
+      {tab === 'episodes' && <ErrorBoundary label="Episodes"><EpisodesTab episodes={episodes} claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} addClaimToState={addClaimToState} onActionError={handleActionError} /></ErrorBoundary>}
+      {tab === 'transcript' && <ErrorBoundary label="Transcript"><TranscriptTab transcript={transcript} conversationId={id} contacts={contactsList} /></ErrorBoundary>}
+      {tab === 'claims' && <ErrorBoundary label="Claims"><ClaimsTab claims={claims} conversationId={id} contacts={contactsList} updateClaim={updateClaim} onActionError={handleActionError} /></ErrorBoundary>}
+      {tab === 'summary' && <ErrorBoundary label="Summary"><SummaryTab synthesis={synthesis} beliefUpdates={beliefUpdates} claims={claims} /></ErrorBoundary>}
+      {tab === 'raw' && <ErrorBoundary label="Raw"><RawTab extraction={parsedExtraction} /></ErrorBoundary>}
 
       {/* Bulk Reassignment Modal */}
       {showReassignModal && (

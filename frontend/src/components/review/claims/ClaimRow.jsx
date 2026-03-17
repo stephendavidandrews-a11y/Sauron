@@ -75,7 +75,7 @@ export function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDef
                   style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, border: `1px solid ${C.border}`,
                     background: showReassign ? C.accent + '15' : 'transparent',
                     color: C.textDim, cursor: 'pointer' }}
-                  title="Move to different episode">{'⇄'}</button>
+                  title="Move to different episode" aria-label="Move claim to different episode">{'⇄'}</button>
                 {showReassign && (
                   <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20,
                     background: C.cardBg || '#1a1f2e', border: `1px solid ${C.border}`,
@@ -184,7 +184,7 @@ export function ClaimRow({ claim, conversationId, isReviewed, isDismissed, isDef
             <button onClick={() => setEditingSubFieldsClaim(claim.id)}
               style={{ position: 'absolute', right: 4, top: 4, background: 'none', border: 'none',
                 cursor: 'pointer', fontSize: 11, color: C.textDim, padding: '2px 4px' }}
-              title="Edit commitment fields">✎</button>
+              title="Edit commitment fields" aria-label="Edit commitment fields">✎</button>
           </div>
         )
       )}

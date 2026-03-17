@@ -203,7 +203,7 @@ export default function Review() {
                     style={{ fontSize: 10, padding: '2px 8px', borderRadius: 3,
                       border: '1px solid ' + C.danger + '33', background: 'transparent',
                       color: C.danger, cursor: 'pointer', opacity: 0.7 }}
-                    title="Discard this conversation">✗</button>
+                    title="Discard this conversation" aria-label="Discard this conversation">✗</button>
                 </div>
               </div>
             ))}
