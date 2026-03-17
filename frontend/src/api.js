@@ -28,6 +28,11 @@ function getCachedContacts(limit = 500) {
   });
 }
 
+export function clearContactsCache() {
+  _contactsCache = null;
+  _contactsCacheTime = 0;
+}
+
 export const api = {
   // Health
   health: () => fetchJSON('/health'),

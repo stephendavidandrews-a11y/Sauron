@@ -4,8 +4,6 @@ Contains: flag_conversation, discard_conversation, mark_reviewed.
 """
 
 import logging
-import uuid
-
 from fastapi import APIRouter, HTTPException
 
 from sauron.db.connection import get_connection
@@ -87,31 +85,24 @@ def mark_reviewed(conversation_id: str):
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # Set reviewed_at and update status to completed
+        # Set reviewed_at timestamp (status update deferred until after routing)
         conn.execute(
-            """UPDATE conversations
-               SET reviewed_at = datetime('now'),
-                   processing_status = 'completed',
-                   current_stage = 'completed',
-                   stage_detail = 'completed',
-                   run_status = 'completed'
-               WHERE id = ?""",
+            "UPDATE conversations SET reviewed_at = datetime('now') WHERE id = ?",
             (conversation_id,),
         )
         conn.commit()
 
         # Route REVIEWED data (corrected DB state, not stale extraction JSON)
+        routing_succeeded = False
         try:
             from sauron.routing.reviewed_payload import build_reviewed_payload
             from sauron.routing.router import route_extraction
             reviewed_payload = build_reviewed_payload(conversation_id)
             route_extraction(conversation_id, reviewed_payload)
+            routing_succeeded = True
 
             # Only set routed_at if routing was not held as pending_entity
             # and no failures occurred.
-            # IMPORTANT: Use a fresh connection to check routing_log because
-            # route_to_networking_app writes failures via its own connection,
-            # and the original conn may not see those rows (SQLite read isolation).
             check_conn = get_connection()
             try:
                 pending_or_failed = check_conn.execute(
@@ -137,6 +128,19 @@ def mark_reviewed(conversation_id: str):
                 )
         except Exception:
             logger.exception(f"Routing failed for {conversation_id[:8]} (non-fatal)")
+
+        # Set terminal status: completed if routing succeeded, routing_failed otherwise
+        final_status = 'completed' if routing_succeeded else 'routing_failed'
+        conn.execute(
+            """UPDATE conversations
+               SET processing_status = ?,
+                   current_stage = 'completed',
+                   stage_detail = ?,
+                   run_status = 'completed'
+               WHERE id = ?""",
+            (final_status, final_status, conversation_id),
+        )
+        conn.commit()
 
         # Count correction stats for this conversation (Change 5)
         try:

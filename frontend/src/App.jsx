@@ -21,8 +21,18 @@ export default function App() {
   useEffect(() => {
     const fetchCounts = () => api.queueCounts().then(setBadgeCounts).catch(() => {});
     fetchCounts();
-    const interval = setInterval(fetchCounts, 30000);
-    return () => clearInterval(interval);
+    let interval = setInterval(fetchCounts, 30000);
+    const onVisibility = () => {
+      if (document.hidden) {
+        clearInterval(interval);
+        interval = null;
+      } else {
+        fetchCounts();
+        interval = setInterval(fetchCounts, 30000);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { clearInterval(interval); document.removeEventListener("visibilitychange", onVisibility); };
   }, []);
   const navigate = useNavigate();
   const location = useLocation();

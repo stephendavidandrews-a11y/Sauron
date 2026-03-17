@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -33,12 +34,13 @@ from sauron.pipeline.processor import process_conversation, process_through_spea
 
 # Configure logging
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+from logging.handlers import RotatingFileHandler
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(LOGS_DIR / "sauron.log"),
+        RotatingFileHandler(LOGS_DIR / "sauron.log", maxBytes=10_000_000, backupCount=5),
     ],
 )
 logger = logging.getLogger("sauron")
@@ -53,16 +55,14 @@ _watcher: InboxWatcher | None = None
 # Scheduler instance (may be None if APScheduler not installed)
 _scheduler = None
 
+# Thread pool for pipeline processing (limits concurrent GPU-heavy work)
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sauron-pipeline")
+
 
 def _on_new_file(conversation_id: str, path):
     """Callback when a new audio file is detected — kick off processing in background."""
     logger.info(f"New file detected, queuing: {path.name} -> {conversation_id[:8]}")
-    thread = threading.Thread(
-        target=process_through_speaker_id,
-        args=(conversation_id,),
-        daemon=True,
-    )
-    thread.start()
+    _executor.submit(process_through_speaker_id, conversation_id)
 
 
 @asynccontextmanager
@@ -281,8 +281,8 @@ if _FRONTEND_DIR.exists():
             return JSONResponse({"detail": "Not Found"}, status_code=404)
         # Check if the path maps to an actual file in dist
         rel = request.url.path.lstrip("/")
-        file_path = _FRONTEND_DIR / rel
-        if file_path.is_file():
+        file_path = (_FRONTEND_DIR / rel).resolve()
+        if file_path.is_relative_to(_FRONTEND_DIR.resolve()) and file_path.is_file():
             return FileResponse(str(file_path))
         return FileResponse(str(_FRONTEND_DIR / "index.html"))
 else:

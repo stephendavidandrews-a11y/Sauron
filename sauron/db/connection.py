@@ -1,6 +1,7 @@
 """Database connection management for sauron.db."""
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 from sauron.config import DB_PATH
@@ -14,3 +15,22 @@ def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=30000")  # 30s retry on lock instead of immediate fail
     return conn
+
+
+@contextmanager
+def get_db(db_path: Path = DB_PATH):
+    """Context manager that yields a connection and auto-closes on exit.
+
+    Usage:
+        with get_db() as conn:
+            conn.execute(...)
+            conn.commit()
+    """
+    conn = get_connection(db_path)
+    try:
+        yield conn
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

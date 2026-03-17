@@ -10,15 +10,6 @@ export const C = {
   red: '#ef4444', purple: '#a78bfa', gray: '#6b7280',
 };
 
-const COMMANDS = [
-  { pattern: /^today$/i, path: '/' },
-  { pattern: /^prep\s+(.+)/i, path: (m) => `/prep/${encodeURIComponent(m[1])}` },
-  { pattern: /^review\s*$/i, path: '/review' },
-  { pattern: /^review\s+today$/i, path: '/review' },
-  { pattern: /^call\s+(.+)/i, path: (m) => `/prep/${encodeURIComponent(m[1])}` },
-  { pattern: /^topic\s+(.+)/i, path: (m) => `/search?q=${encodeURIComponent(m[1])}&mode=topic` },
-  { pattern: /^correct\s+last$/i, path: '/review' },
-];
 
 const STATUS_FAMILIES = {
   active: { label: 'Solid', color: '#10b981' },

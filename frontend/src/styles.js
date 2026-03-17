@@ -16,28 +16,3 @@ export const colors = {
   purple: '#8b5cf6',
 };
 
-export const layout = {
-  sidebar: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    width: 240,
-    background: colors.card,
-    borderRight: `1px solid ${colors.border}`,
-    display: 'flex',
-    flexDirection: 'column',
-    zIndex: 100,
-  },
-  main: {
-    marginLeft: 240,
-    minHeight: '100vh',
-    padding: '24px 32px',
-  },
-  card: {
-    background: colors.card,
-    border: `1px solid ${colors.border}`,
-    borderRadius: 8,
-    padding: 20,
-  },
-};

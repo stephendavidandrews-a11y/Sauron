@@ -59,7 +59,7 @@ export function ClaimsTab({ claims: initialClaims, conversationId, contacts, upd
   const handleEdit = async (claim) => {
     try {
       await api.correctClaim(conversationId, claim.id, 'claim_text_edited', claim.claim_text, editText, null);
-      updateClaim(claim.id, { claim_text: editText, review_status: user_corrected, text_user_edited: true });
+      updateClaim(claim.id, { claim_text: editText, review_status: 'user_corrected', text_user_edited: true });
       setEditingClaim(null);
       setRelinkClaim(claim.id);
     } catch (e) { console.error('Edit failed', e); }

@@ -152,9 +152,9 @@ def process_through_speaker_id(conversation_id: str) -> bool:
             logger.warning(f"Audio preprocessing failed ({type(e).__name__}: {e}) — using original file")
             prepared_path = audio_path
 
-        # Stage 1: Transcription
+        # Stage 1: Transcription (use prepared audio for consistent quality)
         logger.info(f"[{conversation_id[:8]}] Stage 1: Transcribing...")
-        transcription = transcribe(audio_path)
+        transcription = transcribe(prepared_path)
 
         conn.execute(
             "UPDATE conversations SET duration_seconds = ? WHERE id = ?",

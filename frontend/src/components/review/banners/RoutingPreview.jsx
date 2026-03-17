@@ -2,6 +2,22 @@ import { useState, useEffect } from 'react';
 import { api } from '../../../api';
 import { C, cardStyle } from '../styles';
 
+const OBJECT_TYPE_LABELS = {
+  interactions: 'Interactions',
+  commitments: 'Commitments',
+  scheduling_leads: 'Scheduling Leads',
+  standing_offers: 'Standing Offers',
+  signals: 'Signals',
+  life_events: 'Life Events',
+  relationships: 'Relationships',
+  affiliations: 'Affiliations',
+  provenance: 'Provenance',
+  profile_signals: 'Profile Signals',
+  participants: 'Participants',
+  contact_patches: 'Contact Updates',
+  graph_edges: 'Graph Edges',
+};
+
 export function RoutingPreview({ conversationId, refreshKey }) {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);

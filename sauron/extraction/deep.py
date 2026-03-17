@@ -303,6 +303,8 @@ def synthesize(
         messages=[{"role": "user", "content": user_content}],
     )
 
+    if not response.content:
+        raise ValueError("Empty response from extraction model")
     raw_text = extract_json(response.content[0].text)
 
     result = SynthesisResult.model_validate_json(raw_text)
@@ -316,8 +318,7 @@ def synthesize(
         f"Synthesis complete: {len(result.belief_updates)} belief updates, "
         f"{len(result.my_commitments)} my commitments, "
         f"{len(result.contact_commitments)} their commitments, "
-        f"{len(result.graph_edges)} graph edges, "
-        f"{len(result.graph_edges)} graph edges total"
+        f"{len(result.graph_edges)} graph edges"
     )
 
     return result, usage
@@ -347,6 +348,8 @@ def solo_extract(
         messages=[{"role": "user", "content": user_content}],
     )
 
+    if not response.content:
+        raise ValueError("Empty response from extraction model")
     raw_text = extract_json(response.content[0].text)
 
     result = SoloExtractionResult.model_validate_json(raw_text)
@@ -383,40 +386,39 @@ def _build_affiliation_context(conversation_id: int | None = None) -> str:
     try:
         from sauron.db.connection import get_connection
         conn = get_connection()
+        try:
+            # Get contacts involved in this conversation (from claims)
+            contacts = conn.execute("""
+                SELECT DISTINCT uc.id, uc.canonical_name
+                FROM event_claims ec
+                JOIN unified_contacts uc ON ec.subject_entity_id = uc.id
+                WHERE ec.conversation_id = ?
+            """, (conversation_id,)).fetchall()
 
-        # Get contacts involved in this conversation (from claims)
-        contacts = conn.execute("""
-            SELECT DISTINCT uc.id, uc.canonical_name
-            FROM event_claims ec
-            JOIN unified_contacts uc ON ec.subject_entity_id = uc.id
-            WHERE ec.conversation_id = ?
-        """, (conversation_id,)).fetchall()
+            if not contacts:
+                return ""
 
-        if not contacts:
+            lines = []
+            for c in contacts:
+                affs = conn.execute("""
+                    SELECT org_name, org_industry, title, role_type, is_current
+                    FROM contact_affiliations_cache
+                    WHERE unified_contact_id = ?
+                    ORDER BY is_current DESC, synced_at DESC
+                """, (c["id"],)).fetchall()
+
+                # Prioritize current affiliations; include at most 2 per person
+                shown = 0
+                for a in affs:
+                    if shown >= 2:
+                        break
+                    role_str = a["title"] or a["role_type"] or "affiliated"
+                    industry_str = f" ({a['org_industry']})" if a["org_industry"] else ""
+                    current_str = "" if a["is_current"] else " [former]"
+                    lines.append(f"- {c['canonical_name']}: {role_str} at {a['org_name']}{industry_str}{current_str}")
+                    shown += 1
+        finally:
             conn.close()
-            return ""
-
-        lines = []
-        for c in contacts:
-            affs = conn.execute("""
-                SELECT org_name, org_industry, title, role_type, is_current
-                FROM contact_affiliations_cache
-                WHERE unified_contact_id = ?
-                ORDER BY is_current DESC, synced_at DESC
-            """, (c["id"],)).fetchall()
-
-            # Prioritize current affiliations; include at most 2 per person
-            shown = 0
-            for a in affs:
-                if shown >= 2:
-                    break
-                role_str = a["title"] or a["role_type"] or "affiliated"
-                industry_str = f" ({a['org_industry']})" if a["org_industry"] else ""
-                current_str = "" if a["is_current"] else " [former]"
-                lines.append(f"- {c['canonical_name']}: {role_str} at {a['org_name']}{industry_str}{current_str}")
-                shown += 1
-
-        conn.close()
 
         if not lines:
             return ""

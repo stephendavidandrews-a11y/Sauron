@@ -366,53 +366,55 @@ def semantic_search(
     query_vec = _bytes_to_vector(embed_text(query))
 
     conn = get_connection()
+    try:
+        # Build dynamic WHERE clause
+        conditions: list[str] = []
+        params: list = []
+        if source_type is not None:
+            conditions.append("source_type = ?")
+            params.append(source_type)
+        if contact_id is not None:
+            conditions.append("contact_id = ?")
+            params.append(contact_id)
 
-    # Build dynamic WHERE clause
-    conditions: list[str] = []
-    params: list = []
-    if source_type is not None:
-        conditions.append("source_type = ?")
-        params.append(source_type)
-    if contact_id is not None:
-        conditions.append("contact_id = ?")
-        params.append(contact_id)
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
 
-    where = ""
-    if conditions:
-        where = "WHERE " + " AND ".join(conditions)
+        rows = conn.execute(
+            f"""
+            SELECT id, conversation_id, source_type, source_id,
+                   text_content, embedding, contact_id
+            FROM embeddings
+            {where}
+            """,
+            params,
+        ).fetchall()
 
-    rows = conn.execute(
-        f"""
-        SELECT id, conversation_id, source_type, source_id,
-               text_content, embedding, contact_id
-        FROM embeddings
-        {where}
-        """,
-        params,
-    ).fetchall()
-
-    # Score every row
-    scored: list[tuple[float, dict]] = []
-    for row in rows:
-        row_vec = _bytes_to_vector(row["embedding"])
-        sim = _cosine_similarity(query_vec, row_vec)
-        scored.append(
-            (
-                sim,
-                {
-                    "text_content": row["text_content"],
-                    "similarity": round(sim, 4),
-                    "conversation_id": row["conversation_id"],
-                    "contact_id": row["contact_id"],
-                    "source_type": row["source_type"],
-                    "source_id": row["source_id"],
-                },
+        # Score every row
+        scored: list[tuple[float, dict]] = []
+        for row in rows:
+            row_vec = _bytes_to_vector(row["embedding"])
+            sim = _cosine_similarity(query_vec, row_vec)
+            scored.append(
+                (
+                    sim,
+                    {
+                        "text_content": row["text_content"],
+                        "similarity": round(sim, 4),
+                        "conversation_id": row["conversation_id"],
+                        "contact_id": row["contact_id"],
+                        "source_type": row["source_type"],
+                        "source_id": row["source_id"],
+                    },
+                )
             )
-        )
 
-    # Sort descending by similarity, return top-N
-    scored.sort(key=lambda t: t[0], reverse=True)
-    return [item for _, item in scored[:limit]]
+        # Sort descending by similarity, return top-N
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [item for _, item in scored[:limit]]
+    finally:
+        conn.close()
 
 
 

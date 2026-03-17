@@ -110,9 +110,6 @@ export function EntityChips({ claim, contacts, onLink, onRemoveEntity, conversat
 }
 
 // Legacy wrapper for backward compatibility
-function EntityLinkButton({ claim, contacts, onLink }) {
-  return <EntityChips claim={claim} contacts={contacts} onLink={onLink} />;
-}
 
 // ═══════════════════════════════════════════════════════
 // ERROR TYPE DROPDOWN

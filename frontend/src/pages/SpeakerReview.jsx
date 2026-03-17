@@ -94,6 +94,7 @@ function SpeakerCard({ label, match, color, transcripts, onPlay, onAssign, onCre
             type="text"
             placeholder="Search contacts..."
             value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
             style={{
               width: '100%', padding: '6px 8px', fontSize: 12,
               background: C.bg, color: C.text, border: `1px solid ${C.border}`,
@@ -285,6 +286,16 @@ export default function SpeakerReview() {
   }, [id]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
 
 

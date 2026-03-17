@@ -23,9 +23,10 @@ import json
 import logging
 import os
 import smtplib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape as html_escape
 from typing import Any, Optional
 
 from sauron.config import MORNING_EMAIL_RECIPIENT, GOOGLE_CALENDAR_ID
@@ -130,7 +131,7 @@ def _fetch_todays_calendar_events() -> list[dict]:
 
 def _yesterday_range() -> tuple[str, str]:
     """Return (start, end) ISO strings for yesterday 00:00 to 23:59:59."""
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today - timedelta(days=1)
     yesterday_end = today - timedelta(seconds=1)
     return yesterday_start.isoformat(), yesterday_end.isoformat()
@@ -526,7 +527,7 @@ def generate_morning_brief() -> str:
     if triage:
         cards = "".join(
             _alert_card(
-                f'<strong>{_conversation_label(t)}</strong> '
+                f'<strong>{html_escape(_conversation_label(t))}</strong> '
                 f'&mdash; captured {t["created_at"][:16]}, not yet reviewed'
             )
             for t in triage[:5]
@@ -574,9 +575,9 @@ def generate_morning_brief() -> str:
             rows_html += (
                 f'<tr>'
                 f'<td style="padding:6px 8px;border-bottom:1px solid {_BORDER};'
-                f'color:{_TEXT};font-size:13px;">{label}</td>'
+                f'color:{_TEXT};font-size:13px;">{html_escape(label)}</td>'
                 f'<td style="padding:6px 8px;border-bottom:1px solid {_BORDER};'
-                f'color:{_MUTED};font-size:12px;">{summary_short}</td>'
+                f'color:{_MUTED};font-size:12px;">{html_escape(summary_short)}</td>'
                 f'</tr>'
             )
         table = (
@@ -660,7 +661,7 @@ def generate_morning_brief() -> str:
                     f'color:{_ACCENT_ORANGE};font-size:12px;white-space:nowrap;">'
                     f'{ai["type"]}</td>'
                     f'<td style="padding:5px 8px;border-bottom:1px solid {_BORDER};'
-                    f'color:{_TEXT};font-size:13px;">{text_short}</td>'
+                    f'color:{_TEXT};font-size:13px;">{html_escape(text_short)}</td>'
                     f'</tr>'
                 )
             table = (
