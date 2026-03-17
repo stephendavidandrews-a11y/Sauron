@@ -1,4 +1,5 @@
-export { C } from "../../utils/colors";
+import { C } from "../../utils/colors";
+export { C };
 // Design system constants for the review flow.
 
 export const cardStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 20 };
