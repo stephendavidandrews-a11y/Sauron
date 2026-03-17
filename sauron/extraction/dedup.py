@@ -47,12 +47,8 @@ def dedup_claims(claims_result: ClaimsResult) -> ClaimsResult:
         return claims_result
 
     try:
-        from sentence_transformers import SentenceTransformer
-        import os
-        from sauron.config import MODELS_DIR
-
-        os.environ["HF_HOME"] = str(MODELS_DIR / "huggingface")
-        model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        from sauron.embeddings.embedder import _get_model
+        model = _get_model()
     except Exception:
         logger.warning("Embedding model unavailable for dedup — skipping")
         return claims_result

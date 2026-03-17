@@ -518,10 +518,11 @@ def _process_single_cluster(
                 conn.execute("PRAGMA foreign_keys=ON")
                 conn.execute("PRAGMA busy_timeout=30000")
                 conn.execute("""
-                    INSERT OR REPLACE INTO extractions
+                    INSERT INTO extractions
                         (id, conversation_id, pass_number, model_used,
                          extraction_json, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET extraction_json = excluded.extraction_json, created_at = excluded.created_at
                 """, (
                     f"{conversation_id}_synthesis",
                     conversation_id,

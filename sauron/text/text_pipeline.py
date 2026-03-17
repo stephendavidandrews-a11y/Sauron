@@ -99,11 +99,18 @@ def process_text_cluster(
             processing_status = "awaiting_claim_review"
 
         conn.execute("""
-            INSERT OR REPLACE INTO conversations
+            INSERT INTO conversations
                 (id, source, captured_at, context_classification,
                  processing_status, processed_at, title, modality,
                  current_stage, stage_detail, run_status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                processing_status = excluded.processing_status,
+                processed_at = excluded.processed_at,
+                title = excluded.title,
+                current_stage = excluded.current_stage,
+                stage_detail = excluded.stage_detail,
+                run_status = excluded.run_status
         """, (
             conversation_id,
             "text_cluster",
@@ -127,9 +134,12 @@ def process_text_cluster(
         # 3. Store triage in extractions table (same pattern as voice)
         triage_json = json.dumps(triage, default=str)
         conn.execute("""
-            INSERT OR REPLACE INTO extractions
+            INSERT INTO extractions
                 (id, conversation_id, pass_number, model_used, extraction_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                extraction_json = excluded.extraction_json,
+                created_at = excluded.created_at
         """, (
             f"{conversation_id}_triage",
             conversation_id,
@@ -146,9 +156,12 @@ def process_text_cluster(
         if claims_result and claims_result.claims:
             claims_json = claims_result.model_dump_json()
             conn.execute("""
-                INSERT OR REPLACE INTO extractions
+                INSERT INTO extractions
                     (id, conversation_id, pass_number, model_used, extraction_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    extraction_json = excluded.extraction_json,
+                    created_at = excluded.created_at
             """, (
                 f"{conversation_id}_claims",
                 conversation_id,
@@ -264,7 +277,7 @@ def process_text_cluster(
                     default=str,
                 )
                 conn.execute("""
-                    INSERT OR REPLACE INTO extractions
+                    INSERT INTO extractions
                         (id, conversation_id, pass_number, model_used,
                          extraction_json, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)

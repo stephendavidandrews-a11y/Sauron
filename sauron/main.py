@@ -15,7 +15,6 @@ load_dotenv()
 import logging
 import os
 import sys
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -91,21 +90,9 @@ async def lifespan(app: FastAPI):
     finally:
         _conn.close()
     if _pending:
-        import time as _time
-        logger.info(f"Startup scan: {len(_pending)} pending conversations — processing in background")
-        def _process_pending_batch(conv_ids):
-            for cid in conv_ids:
-                try:
-                    process_through_speaker_id(cid)
-                except Exception as exc:
-                    logger.error(f"Startup processing failed for {cid[:8]}: {exc}")
-                _time.sleep(2)  # avoid overwhelming system
-        _t = threading.Thread(
-            target=_process_pending_batch,
-            args=([r["id"] for r in _pending],),
-            daemon=True,
-        )
-        _t.start()
+        logger.info(f"Startup scan: {len(_pending)} pending conversations — submitting to executor")
+        for r in _pending:
+            _executor.submit(process_through_speaker_id, r["id"])
 
     # Start APScheduler for morning brief (graceful if not installed)
     try:
