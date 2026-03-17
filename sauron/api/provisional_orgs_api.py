@@ -4,7 +4,7 @@ import logging
 import sqlite3
 
 from sauron.db.connection import get_connection
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -208,7 +208,7 @@ def approve_provisional_org(suggestion_id: str, body: ApproveRequest = ApproveRe
 
         # Update all pending suggestions with same normalized_name
         norm = suggestion["normalized_name"]
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         conn.execute("""
             UPDATE provisional_org_suggestions
             SET status = 'approved', resolved_org_id = ?, resolved_metadata = ?, resolved_at = ?
@@ -265,7 +265,7 @@ def merge_provisional_org(suggestion_id: str, body: MergeRequest):
 
         # Update all pending with same normalized_name
         norm = suggestion["normalized_name"]
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         conn.execute("""
             UPDATE provisional_org_suggestions
             SET status = 'merged', resolved_org_id = ?, resolved_metadata = ?, resolved_at = ?
@@ -310,7 +310,7 @@ def dismiss_provisional_org(suggestion_id: str):
 
         # Dismiss all pending with same normalized_name
         norm = suggestion["normalized_name"]
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         conn.execute("""
             UPDATE provisional_org_suggestions
             SET status = 'dismissed', resolved_at = ?

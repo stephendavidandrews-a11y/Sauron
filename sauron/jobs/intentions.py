@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import anthropic
@@ -75,7 +75,7 @@ def create_intention(
     """
     conn = get_connection()
     intention_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     # Generate the auto brief if we have a contact
     auto_brief = None
@@ -180,7 +180,7 @@ def find_unlinked_intention(
     """
     conn = get_connection()
     cutoff = (
-        datetime.utcnow() - timedelta(hours=time_window_hours)
+        datetime.now(timezone.utc) - timedelta(hours=time_window_hours)
     ).isoformat()
 
     row = conn.execute(
@@ -315,7 +315,7 @@ Respond with ONLY the JSON object, no other text."""
             json.dumps(assessment),
             overall,
             json.dumps(unexpected) if unexpected else None,
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             intention_id,
         ),
     )

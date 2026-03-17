@@ -6,7 +6,7 @@ graph edges (relationship links between entities).
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -207,7 +207,7 @@ def create_edge(body: EdgeCreateRequest):
     conn = get_connection()
     try:
         edge_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         conn.execute(
             """INSERT INTO graph_edges

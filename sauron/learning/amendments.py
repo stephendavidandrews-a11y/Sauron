@@ -621,7 +621,7 @@ direct instructions to the extraction model."""
             amendment_text,
             source_analysis_json,
             len(all_correction_ids),
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
         ),
     )
 
@@ -684,7 +684,7 @@ def update_contact_preference(
     if isinstance(value, (dict, list)):
         value = json.dumps(value)
 
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     if existing:
         conn.execute(

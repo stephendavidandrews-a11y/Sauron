@@ -1,4 +1,4 @@
-import { QuickPassProposalCard } from "../../pages/Review";
+import { QuickPassProposalCard } from "../../components/review/quickpass/QuickPassProposalCard";
 import { fn } from "storybook/test";
 
 export default {

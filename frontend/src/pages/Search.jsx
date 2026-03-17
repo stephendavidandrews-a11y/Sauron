@@ -2,14 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { fetchTextPendingContacts, approveTextContact, dismissTextContact, deferTextContact, triggerTextSync, fetchTextStatus } from '../api';
-
-export const C = {
-  bg: '#0a0f1a', card: '#111827', border: '#1f2937',
-  text: '#e5e7eb', muted: '#9ca3af', dim: '#6b7280',
-  accent: '#3b82f6', green: '#10b981', amber: '#f59e0b',
-  red: '#ef4444', purple: '#a78bfa', gray: '#6b7280',
-};
-
+import { C } from "../utils/colors";
+import { relativeTime } from "../utils/time";
 
 const STATUS_FAMILIES = {
   active: { label: 'Solid', color: '#10b981' },
@@ -33,23 +27,6 @@ const BROWSE_FAMILIES = [
 
 // Module-level recent queries (persists across re-renders, resets on full page nav)
 let recentQueriesStore = [];
-
-function relativeTime(dateStr) {
-  if (!dateStr) return '';
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now - date;
-  const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHrs = Math.floor(diffMins / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-  const diffDays = Math.floor(diffHrs / 24);
-  if (diffDays === 1) return 'yesterday';
-  if (diffDays < 7) return `${diffDays}d ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  return date.toLocaleDateString();
-}
 
 function truncate(str, len) {
   if (!str) return '';
@@ -115,7 +92,6 @@ export default function Search() {
     const q = query.trim();
     if (!q) return;
     setShowRecent(false);
-    }
     navigate(`/search?q=${encodeURIComponent(q)}`, { replace: true });
     doSearch(q);
   };

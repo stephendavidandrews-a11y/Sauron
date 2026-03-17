@@ -1,12 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
-
-const C = {
-  bg: '#0a0f1a', card: '#111827', border: '#1e293b',
-  text: '#e2e8f0', textDim: '#64748b', accent: '#3b82f6',
-  success: '#22c55e', danger: '#ef4444', warning: '#f59e0b',
-};
+import { C } from "../utils/colors";
 
 const ACCEPTED = '.m4a,.mp3,.wav,.flac,.ogg,.opus,.webm';
 

@@ -1,4 +1,4 @@
-import { QuickPassErrorPicker } from "../../pages/Review";
+import { QuickPassErrorPicker } from "../../components/review/quickpass/QuickPassErrorPicker";
 import { fn } from "storybook/test";
 
 export default {

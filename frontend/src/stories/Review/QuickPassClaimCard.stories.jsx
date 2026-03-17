@@ -1,4 +1,4 @@
-import { QuickPassClaimCard, claimTypeColors } from "../../pages/Review";
+import { QuickPassClaimCard, claimTypeColors } from "../../components/review/quickpass/QuickPassClaimCard";
 import { fn } from "storybook/test";
 
 export default {

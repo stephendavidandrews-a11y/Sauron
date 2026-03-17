@@ -1,12 +1,6 @@
+export { C } from "../../utils/colors";
 // Design system constants for the review flow.
 
-export const C = {
-  bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
-  border: '#1f2937', borderLight: '#374151', text: '#e5e7eb',
-  textMuted: '#9ca3af', textDim: '#6b7280', accent: '#3b82f6',
-  success: '#10b981', warning: '#f59e0b', danger: '#ef4444', purple: '#8b5cf6',
-  amber: '#d97706',
-};
 export const cardStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 20 };
 
 export const claimTypeColors = {

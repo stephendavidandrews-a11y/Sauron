@@ -19,7 +19,7 @@ Phase C: Inline commitments, null-only contact patching, all-or-nothing routing.
 import json as _json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from sauron.routing.provisional import store_provisional_org
@@ -274,7 +274,7 @@ def _execute_routing(
             "sourceSystem": "sauron",
             "sourceId": conversation_id,
             "type": "conversation",
-            "date": datetime.utcnow().isoformat() + "Z",
+            "date": datetime.now(timezone.utc).isoformat() + "Z",
             "summary": synthesis.get("summary", ""),
             "topicsDiscussed": synthesis.get("topics_discussed", []),
             "relationshipNotes": synthesis.get("relationship_notes"),

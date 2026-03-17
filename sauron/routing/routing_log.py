@@ -7,7 +7,7 @@ See Integration Spec v2, Sections 11.4 and 13.
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sauron.db.connection import get_connection
 
@@ -38,7 +38,7 @@ def log_route(
 
     try:
         log_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """INSERT INTO routing_log
                (id, conversation_id, target_system, route_type, object_class,
@@ -190,7 +190,7 @@ def release_pending_routes(entity_id: str, networking_app_contact_id: str, conn=
                 )
 
                 # Update routing log to sent
-                now = datetime.utcnow().isoformat()
+                now = datetime.now(timezone.utc).isoformat()
                 conn.execute(
                     """UPDATE routing_log
                        SET status = 'sent',
@@ -223,7 +223,7 @@ def release_pending_routes(entity_id: str, networking_app_contact_id: str, conn=
 
             except Exception as e:
                 # Mark as failed instead
-                now = datetime.utcnow().isoformat()
+                now = datetime.now(timezone.utc).isoformat()
                 conn.execute(
                     """UPDATE routing_log
                        SET status = 'failed',

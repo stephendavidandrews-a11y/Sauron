@@ -6,7 +6,7 @@ See Integration Spec v2, Section 13.3.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sauron.db.connection import get_connection
 from sauron.routing.routing_log import get_failed_routes
@@ -53,7 +53,7 @@ def retry_failed_routes_job():
             cid = route["conversation_id"]
 
             ok = route_to_networking_app(cid, payload, is_retry=True)
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
 
             if ok:
                 conn.execute(

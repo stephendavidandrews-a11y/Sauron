@@ -1,14 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-
-const C = {
-  bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
-  border: '#1f2937', text: '#e5e7eb',
-  textMuted: '#9ca3af', textDim: '#6b7280',
-  accent: '#3b82f6', success: '#10b981', warning: '#f59e0b',
-  danger: '#ef4444', purple: '#8b5cf6', amber: '#f59e0b',
-};
+import { C } from "../utils/colors";
 
 const FAMILIES = {
   solid: { label: 'Solid', color: '#10b981', statuses: ['active', 'refined'] },

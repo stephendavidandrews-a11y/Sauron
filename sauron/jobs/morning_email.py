@@ -30,7 +30,7 @@ from html import escape as html_escape
 from typing import Any, Optional
 
 from sauron.config import MORNING_EMAIL_RECIPIENT, GOOGLE_CALENDAR_ID
-from sauron.db.connection import get_connection
+from sauron.db.connection import get_connection, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ def _fetch_todays_calendar_events() -> list[dict]:
 
         service = build("calendar", "v3", credentials=creds)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = start_of_day + timedelta(days=1)
 
@@ -514,7 +514,12 @@ def _blue_card(text: str) -> str:
 
 def generate_morning_brief() -> str:
     """Build the full morning brief HTML email."""
-    conn = get_connection()
+    with get_db() as conn:
+        return _generate_morning_brief_inner(conn)
+
+
+def _generate_morning_brief_inner(conn) -> str:
+    """Inner implementation — receives a managed DB connection."""
     now = datetime.now()
     title = now.strftime("%A, %B %d, %Y")
 

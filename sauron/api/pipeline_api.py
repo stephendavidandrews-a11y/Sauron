@@ -477,7 +477,7 @@ async def retry_failed_routes(background_tasks: BackgroundTasks):
 
                 success = route_to_networking_app(cid, payload)
 
-                now = datetime.utcnow().isoformat()
+                now = datetime.now(timezone.utc).isoformat()
                 if success:
                     # Mark original failed entry as retried_success
                     conn.execute(

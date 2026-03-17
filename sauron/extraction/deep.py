@@ -264,7 +264,7 @@ def synthesize(
     triage: TriageResult | None = None,
     existing_beliefs: list[dict] | None = None,
     amendment_context: str = "",
-    conversation_id: int | None = None,
+    conversation_id: str | None = None,
 ) -> tuple[SynthesisResult, dict]:
     """Run Opus synthesis on claims + vocal analysis.
 
@@ -368,7 +368,7 @@ def solo_extract(
 
 
 
-def _build_affiliation_context(conversation_id: int | None = None) -> str:
+def _build_affiliation_context(conversation_id: str | None = None) -> str:
     """Build affiliation context string for contacts in a conversation.
 
     Only includes affiliations for contacts actually present in the conversation.

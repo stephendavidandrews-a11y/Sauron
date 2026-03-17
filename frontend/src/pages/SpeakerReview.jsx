@@ -1,14 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
-
-const C = {
-  bg: '#0a0f1a', card: '#111827', cardHover: '#1a2234',
-  border: '#1f2937', text: '#e5e7eb',
-  textMuted: '#9ca3af', textDim: '#6b7280',
-  accent: '#3b82f6', success: '#10b981', warning: '#f59e0b',
-  danger: '#ef4444', purple: '#a78bfa', amber: '#f59e0b',
-};
+import { C } from "../utils/colors";
 
 const speakerColors = ['#60a5fa', '#f472b6', '#34d399', '#fbbf24', '#a78bfa', '#fb923c'];
 

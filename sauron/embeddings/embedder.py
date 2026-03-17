@@ -27,7 +27,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 from sauron.config import EMBEDDING_MODEL, EMBEDDING_DIM
-from sauron.db.connection import get_connection
+from sauron.db.connection import get_connection, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,12 @@ def embed_conversation(conversation_id: str) -> None:
 
     Skips items that have already been embedded (idempotent).
     """
-    conn = get_connection()
+    with get_db() as conn:
+        _embed_conversation_inner(conn, conversation_id)
+
+
+def _embed_conversation_inner(conn, conversation_id: str) -> None:
+    """Inner implementation with managed connection."""
     embedded_count = 0
 
     # ------------------------------------------------------------------
@@ -481,7 +486,7 @@ def re_embed_items(items: list[dict]) -> int:
     Each item: {source_type, source_id, conversation_id, new_text, contact_id}
     Deletes old embedding and inserts new one. Returns count re-embedded.
     """
-    from sauron.db.connection import get_connection
+    from sauron.db.connection import get_connection, get_db
     conn = get_connection()
     count = 0
     try:

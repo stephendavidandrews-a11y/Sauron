@@ -168,6 +168,10 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.error("Scheduler shutdown error: %s", exc)
 
+    # Shutdown thread pool executor
+    _executor.shutdown(wait=False)
+    logger.info("Pipeline executor stopped")
+
     # Shutdown file watcher
     if _watcher:
         _watcher.stop()
@@ -300,7 +304,7 @@ def cli():
 
     uvicorn.run(
         "sauron.main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=SAURON_PORT,
         reload=False,
     )
