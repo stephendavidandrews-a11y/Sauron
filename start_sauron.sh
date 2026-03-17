@@ -31,4 +31,4 @@ rotate_log() {
 rotate_log logs/sauron.stderr.log
 rotate_log logs/sauron.stdout.log
 
-exec /Users/stephen/Documents/Website/Sauron/.venv/bin/python -m uvicorn sauron.main:app --host 127.0.0.1 --port 8003 --log-level info     >>logs/sauron.stdout.log 2>>logs/sauron.stderr.log
+exec /Users/stephen/Documents/Website/Sauron/.venv/bin/python -m uvicorn sauron.main:app --host 127.0.0.1 --port 8003 --log-level info
