@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../api';
-import { C, cardStyle, claimTypeColors } from '../styles';
+import { C } from "../../../utils/colors";
+import { cardStyle, claimTypeColors } from '../styles';
 import { ClaimTextWithOverrides } from './ClaimTextWithOverrides';
 import { EntityChips } from './EntityChips';
 import { ErrorTypeDropdown } from './ErrorTypeDropdown';

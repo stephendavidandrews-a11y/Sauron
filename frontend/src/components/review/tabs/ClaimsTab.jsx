@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../../api';
-import { C, cardStyle, claimTypeColors } from '../styles';
+import { C } from "../../../utils/colors";
+import { cardStyle, claimTypeColors } from '../styles';
 import { ClaimRow } from '../claims/ClaimRow';
 
 export function ClaimsTab({ claims: initialClaims, conversationId, contacts, updateClaim, onActionError }) {

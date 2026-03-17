@@ -3,7 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import { fetchRoutingSummary, fetchPendingRoutes } from '../api';
 import TextReplaceCascade from '../components/TextReplaceCascade';
-import { C, cardStyle, Chip } from '../components/review/styles';
+import { C } from "../utils/colors";
+import { cardStyle, Chip } from '../components/review/styles';
 import { EpisodesTab } from '../components/review/tabs/EpisodesTab';
 import { ClaimsTab } from '../components/review/tabs/ClaimsTab';
 import { TranscriptTab } from '../components/review/tabs/TranscriptTab';
@@ -390,7 +391,8 @@ export default function ConversationDetail() {
 // Re-exports for Storybook compatibility
 // Stories import from '../../pages/ConversationDetail'
 // ═══════════════════════════════════════════════════════
-export { C, cardStyle, Chip } from '../components/review/styles';
+export { C } from '../utils/colors';
+export { cardStyle, Chip } from '../components/review/styles';
 export { claimTypeColors, errorTypes } from '../components/review/styles';
 export { EpisodesTab } from '../components/review/tabs/EpisodesTab';
 export { ClaimsTab } from '../components/review/tabs/ClaimsTab';

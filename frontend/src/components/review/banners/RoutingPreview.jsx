@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../../api';
-import { C, cardStyle } from '../styles';
+import { C } from "../../../utils/colors";
+import { cardStyle } from '../styles';
 
 const OBJECT_TYPE_LABELS = {
   interactions: 'Interactions',

@@ -1,4 +1,4 @@
-import { C } from '../styles';
+import { C } from "../../../utils/colors";
 
 export function ClaimTextWithOverrides({ text, overrides }) {
   if (!overrides || !Array.isArray(overrides) || overrides.length === 0) {

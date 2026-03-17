@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../api';
-import { C, claimTypeColors } from '../styles';
+import { C } from "../../../utils/colors";
+import { claimTypeColors } from '../styles';
 
 export function AddClaimForm({ conversationId, episodeId, contacts, onCreated, onCancel }) {
   const [claimType, setClaimType] = useState('fact');

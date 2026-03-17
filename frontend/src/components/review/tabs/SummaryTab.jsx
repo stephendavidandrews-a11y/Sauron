@@ -1,4 +1,5 @@
-import { C, cardStyle, claimTypeColors } from '../styles';
+import { C } from "../../../utils/colors";
+import { cardStyle, claimTypeColors } from '../styles';
 
 export function SummaryTab({ synthesis, beliefUpdates, claims = [] }) {
   return (

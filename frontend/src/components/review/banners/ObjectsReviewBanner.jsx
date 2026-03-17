@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../../api';
-import { C, cardStyle } from '../styles';
+import { C } from "../../../utils/colors";
+import { cardStyle } from '../styles';
 
 export function ObjectsReviewBanner({ conversationId, onResolved }) {
   const [entities, setEntities] = useState([]);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../../api';
-import { C } from '../styles';
+import { C } from "../../../utils/colors";
 
 export function EntityChips({ claim, contacts, onLink, onRemoveEntity, conversationId }) {
   const entities = claim.entities || [];

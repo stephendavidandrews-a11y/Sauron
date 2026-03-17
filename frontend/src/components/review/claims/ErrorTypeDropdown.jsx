@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { C, errorTypes } from '../styles';
+import { C } from "../../../utils/colors";
+import { errorTypes } from '../styles';
 
 export function ErrorTypeDropdown({ claim, onSelect }) {
   const [open, setOpen] = useState(false);

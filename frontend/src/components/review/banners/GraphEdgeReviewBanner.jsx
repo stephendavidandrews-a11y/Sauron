@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchGraphEdges, confirmGraphEdge, dismissGraphEdge, updateGraphEdge } from '../../../api';
-import { C, cardStyle, OBJECT_TYPE_LABELS } from '../styles';
+import { C } from "../../../utils/colors";
+import { cardStyle, OBJECT_TYPE_LABELS } from '../styles';
 
 export function GraphEdgeReviewBanner({ conversationId, refreshKey }) {
   const [edges, setEdges] = useState([]);

@@ -1,5 +1,6 @@
+// C is imported for local use only. Consumers must import C directly
+// from "utils/colors" — do NOT re-export C from this file.
 import { C } from "../../utils/colors";
-export { C };
 // Design system constants for the review flow.
 
 export const cardStyle = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 20 };
