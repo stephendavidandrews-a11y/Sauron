@@ -97,28 +97,7 @@ CREATE TABLE IF NOT EXISTS what_changed_snapshots (
 
 -- ═══ Opportunity Engine (later phases — stub tables) ═══
 
-CREATE TABLE IF NOT EXISTS opportunity_signals (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT REFERENCES conversations(id),
-    target_contact_id TEXT,
-    signal_type TEXT,
-    priority TEXT,
-    explanation TEXT,
-    recommended_action TEXT,
-    status TEXT DEFAULT 'open',
-    created_at DATETIME DEFAULT (datetime('now'))
-);
 
-CREATE TABLE IF NOT EXISTS ask_vectors (
-    id TEXT PRIMARY KEY,
-    target_contact_id TEXT,
-    conversation_id TEXT REFERENCES conversations(id),
-    preferred_channel TEXT,
-    framing_notes TEXT,
-    reciprocity_angle TEXT,
-    avoid_notes TEXT,
-    created_at DATETIME DEFAULT (datetime('now'))
-);
 """
 
 V6_INDEXES_SQL = """
@@ -136,9 +115,6 @@ CREATE INDEX IF NOT EXISTS idx_belief_evidence_belief ON belief_evidence(belief_
 CREATE INDEX IF NOT EXISTS idx_belief_evidence_claim ON belief_evidence(claim_id);
 CREATE INDEX IF NOT EXISTS idx_what_changed_entity ON what_changed_snapshots(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_what_changed_date ON what_changed_snapshots(snapshot_date);
-CREATE INDEX IF NOT EXISTS idx_opportunity_signals_contact ON opportunity_signals(target_contact_id);
-CREATE INDEX IF NOT EXISTS idx_opportunity_signals_status ON opportunity_signals(status);
-CREATE INDEX IF NOT EXISTS idx_ask_vectors_contact ON ask_vectors(target_contact_id);
 """
 
 

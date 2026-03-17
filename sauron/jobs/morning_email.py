@@ -250,7 +250,7 @@ def _get_triage_items(conn) -> list[dict]:
 
 def _get_performance_stats(conn) -> dict[str, Any]:
     """Last 7 days of personal_performance aggregated."""
-    seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     rows = conn.execute(
         """
         SELECT
