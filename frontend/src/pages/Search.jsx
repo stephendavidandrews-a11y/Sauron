@@ -115,14 +115,6 @@ export default function Search() {
     const q = query.trim();
     if (!q) return;
     setShowRecent(false);
-    // Check commands first
-    for (const cmd of COMMANDS) {
-      const m = q.match(cmd.pattern);
-      if (m) {
-        const path = typeof cmd.path === 'function' ? cmd.path(m) : cmd.path;
-        navigate(path);
-        return;
-      }
     }
     navigate(`/search?q=${encodeURIComponent(q)}`, { replace: true });
     doSearch(q);
