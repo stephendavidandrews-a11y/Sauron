@@ -26,8 +26,8 @@ def _make_extraction(summary="Test meeting", graph_edges=None):
     }
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 @patch("sauron.routing.networking.resolve_networking_contact_id")
 def test_interaction_skipped_when_no_contact_id(mock_resolve, mock_api, mock_store,
                                                  test_conn, patch_get_connection):
@@ -48,8 +48,8 @@ def test_interaction_skipped_when_no_contact_id(mock_resolve, mock_api, mock_sto
                 "Interaction should be skipped when no contactId"
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 def test_interaction_sent_when_contact_id_provided(mock_api, mock_store,
                                                     test_conn, patch_get_connection):
     """contactId provided → interaction POSTed with contactId in payload."""
@@ -71,8 +71,8 @@ def test_interaction_sent_when_contact_id_provided(mock_api, mock_store,
     assert payload["contactId"] == na_id
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 def test_graph_edge_skipped_for_non_uuid_ids(mock_api, mock_store,
                                               test_conn, patch_get_connection):
     """Non-UUID contact IDs (like seed-treasury) → graph edge skipped."""
@@ -110,8 +110,8 @@ def test_graph_edge_skipped_for_non_uuid_ids(mock_api, mock_store,
     assert len(rel_calls) == 0, "Non-UUID IDs should not be sent to contact-relationships"
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 def test_graph_edge_sent_for_valid_uuid_ids(mock_api, mock_store,
                                              test_conn, patch_get_connection):
     """Proper UUIDs → graph edge POSTed."""
@@ -148,8 +148,8 @@ def test_graph_edge_sent_for_valid_uuid_ids(mock_api, mock_store,
     assert len(rel_calls) >= 1, "Valid UUID IDs should be sent to contact-relationships"
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 def test_graph_edge_skipped_for_self_referential(mock_api, mock_store,
                                                   test_conn, patch_get_connection):
     """Same entity on both sides → graph edge skipped."""
@@ -185,8 +185,8 @@ def test_graph_edge_skipped_for_self_referential(mock_api, mock_store,
     assert len(rel_calls) == 0, "Self-referential edges should be skipped"
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 @patch("sauron.routing.networking._resolve_contact_id_for_entity")
 def test_solo_prep_skips_interaction(mock_resolve_entity, mock_api, mock_store,
                                      test_conn, patch_get_connection):
@@ -217,8 +217,8 @@ def test_solo_prep_skips_interaction(mock_resolve_entity, mock_api, mock_store,
     assert len(interaction_calls) == 0, "Solo prep should skip interaction"
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 @patch("sauron.routing.networking._resolve_contact_id_for_entity")
 def test_solo_debrief_skips_thin_summary(mock_resolve_entity, mock_api, mock_store,
                                           test_conn, patch_get_connection):
@@ -249,8 +249,8 @@ def test_solo_debrief_skips_thin_summary(mock_resolve_entity, mock_api, mock_sto
     assert len(interaction_calls) == 0, "Thin debrief summary should skip interaction"
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 @patch("sauron.routing.networking._resolve_contact_id_for_entity")
 def test_solo_debrief_routes_substantive_summary(mock_resolve_entity, mock_api, mock_store,
                                                    test_conn, patch_get_connection):
@@ -281,8 +281,8 @@ def test_solo_debrief_routes_substantive_summary(mock_resolve_entity, mock_api, 
     assert len(interaction_calls) >= 1, "Substantive debrief should create interaction"
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 @patch("sauron.routing.networking._resolve_contact_id_for_entity")
 def test_solo_multiple_contacts_skips_routing(mock_resolve_entity, mock_api, mock_store,
                                                test_conn, patch_get_connection):
@@ -308,8 +308,8 @@ def test_solo_multiple_contacts_skips_routing(mock_resolve_entity, mock_api, moc
     mock_api.assert_not_called()
 
 
-@patch("sauron.routing.networking._store_routing_summary")
-@patch("sauron.routing.networking._api_call")
+@patch("sauron.routing.lanes.core._store_routing_summary")
+@patch("sauron.routing.lanes.core._api_call")
 def test_failure_not_logged_on_retry(mock_api, mock_store, test_conn, patch_get_connection):
     """is_retry=True + error → no new routing_log entry."""
     cid = seed_conversation(test_conn, conv_id="conv_retry_nolog")

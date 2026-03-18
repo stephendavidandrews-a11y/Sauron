@@ -120,3 +120,54 @@ def _api_call(
         return False, "ConnectError: Networking app not reachable", None
     except Exception as e:
         return False, str(e)[:300], None
+
+
+@dataclass
+class RoutingContext:
+    """Shared mutable state passed through all lane functions.
+
+    Each lane appends to errors/secondary_errors/successes and
+    core_lane_results/secondary_lane_results. The orchestrator
+    reads these after all lanes complete to build the verdict.
+    """
+    conversation_id: str
+    synthesis: dict
+    claims: dict
+    networking_app_contact_id: str | None
+    sel_conn: object  # sqlite3.Connection
+    is_solo: bool = False
+    solo_mode: str = ""
+    errors: list = field(default_factory=list)          # [(class, payload, err)]
+    secondary_errors: list = field(default_factory=list)
+    successes: list = field(default_factory=list)        # [(class, payload)]
+    core_lane_results: list = field(default_factory=list)
+    secondary_lane_results: list = field(default_factory=list)
+
+
+def _summarize_lane(
+    ctx: RoutingContext,
+    lane_name: str,
+    object_class: str,
+    *,
+    secondary: bool = True,
+):
+    """Add a lane summary entry based on errors/successes for object_class.
+
+    Checks ctx.secondary_errors (if secondary=True) or ctx.errors for
+    failures matching object_class, and ctx.successes for any matches.
+    Appends to ctx.secondary_lane_results or ctx.core_lane_results.
+    """
+    target = ctx.secondary_lane_results if secondary else ctx.core_lane_results
+    err_source = ctx.secondary_errors if secondary else ctx.errors
+
+    errs = [e for c, _, e in err_source if c == object_class]
+    has_success = any(c == object_class for c, _ in ctx.successes)
+
+    if errs:
+        entry = {"name": lane_name, "status": "failed"}
+        entry["reason" if secondary else "error"] = errs[0]
+        target.append(entry)
+    elif has_success:
+        target.append({"name": lane_name, "status": "success"})
+    else:
+        target.append({"name": lane_name, "status": "skipped_no_data"})
