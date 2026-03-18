@@ -79,8 +79,8 @@ async def trigger_text_sync(dry_run: bool = False):
         except Exception as e:
             logger.error("[API] Text sync failed: %s", e, exc_info=True)
 
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    from sauron.executor import submit_background_job
+    submit_background_job(_run)
 
     return {"status": "sync_started", "dry_run": dry_run}
 

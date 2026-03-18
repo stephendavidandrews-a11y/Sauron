@@ -17,7 +17,7 @@ load_dotenv()
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from sauron.executor import submit_pipeline_job, shutdown as executor_shutdown
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -64,8 +64,6 @@ _watcher: InboxWatcher | None = None
 # Scheduler instance (may be None if APScheduler not installed)
 _scheduler = None
 
-# Thread pool for pipeline processing (limits concurrent GPU-heavy work)
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sauron-pipeline")
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -74,7 +72,7 @@ limiter = Limiter(key_func=get_remote_address)
 def _on_new_file(conversation_id: str, path):
     """Callback when a new audio file is detected — kick off processing in background."""
     logger.info(f"New file detected, queuing: {path.name} -> {conversation_id[:8]}")
-    _executor.submit(process_through_speaker_id, conversation_id)
+    submit_pipeline_job(process_through_speaker_id, conversation_id)
 
 
 @asynccontextmanager
@@ -105,7 +103,7 @@ async def lifespan(app: FastAPI):
     if _pending:
         logger.info(f"Startup scan: {len(_pending)} pending conversations — submitting to executor")
         for r in _pending:
-            _executor.submit(process_through_speaker_id, r["id"])
+            submit_pipeline_job(process_through_speaker_id, r["id"])
 
     # Start APScheduler for morning brief (graceful if not installed)
     try:
@@ -169,7 +167,7 @@ async def lifespan(app: FastAPI):
             logger.error("Scheduler shutdown error: %s", exc)
 
     # Shutdown thread pool executor
-    _executor.shutdown(wait=False)
+    executor_shutdown(wait=False)
     logger.info("Pipeline executor stopped")
 
     # Shutdown file watcher

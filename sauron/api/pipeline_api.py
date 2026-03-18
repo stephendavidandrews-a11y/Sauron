@@ -208,13 +208,8 @@ async def upload_recording(
 
     # Trigger processing in background thread (same as watcher)
     from sauron.pipeline.processor import process_through_speaker_id
-    import threading
-    t = threading.Thread(
-        target=process_through_speaker_id,
-        args=(conversation_id,),
-        daemon=True,
-    )
-    t.start()
+    from sauron.executor import submit_pipeline_job
+    submit_pipeline_job(process_through_speaker_id, conversation_id)
 
     return {
         "status": "uploaded",
@@ -333,15 +328,14 @@ def confirm_speakers(conversation_id: str):
 
     # Run extraction pipeline (triage + Sonnet + Opus)
     from sauron.pipeline.processor import process_extraction
-    import threading
+    from sauron.executor import submit_pipeline_job
     def _run():
         try:
             process_extraction(conversation_id)
         except Exception:
             logging.getLogger(__name__).exception(f"Extraction failed for {conversation_id}")
 
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    submit_pipeline_job(_run)
 
     return {"status": "ok", "message": "Speaker review confirmed, extraction started", "conversation_id": conversation_id}
 
@@ -370,15 +364,14 @@ def promote_triage(conversation_id: str):
         conn.close()
 
     from sauron.pipeline.processor import process_extraction_skip_triage
-    import threading
+    from sauron.executor import submit_pipeline_job
     def _run():
         try:
             process_extraction_skip_triage(conversation_id)
         except Exception:
             logging.getLogger(__name__).exception(f"Promoted extraction failed for {conversation_id}")
 
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    submit_pipeline_job(_run)
 
     return {"status": "ok", "message": "Triage promoted, extraction started", "conversation_id": conversation_id}
 

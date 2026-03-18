@@ -39,7 +39,7 @@ def _check_dynamic_trigger(conn):
         DYNAMIC_TRIGGER_THRESHOLD = 25
 
         if pending >= DYNAMIC_TRIGGER_THRESHOLD:
-            import threading
+            from sauron.executor import submit_background_job
             def _run_analysis():
                 try:
                     from sauron.learning.amendments import analyze_corrections_and_amend
@@ -48,7 +48,7 @@ def _check_dynamic_trigger(conn):
                         logger.info("Dynamic trigger: generated new amendment from %d corrections", pending)
                 except Exception:
                     logger.exception("Dynamic trigger analysis failed")
-            threading.Thread(target=_run_analysis, daemon=True).start()
+            submit_background_job(_run_analysis)
     except Exception:
         logger.exception("Dynamic trigger check failed (non-fatal)")
 

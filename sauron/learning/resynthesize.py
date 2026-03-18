@@ -252,6 +252,6 @@ def queue_resynthesis(belief_id: str, trigger_correction_id: str = None) -> None
         except Exception:
             logger.exception("Background re-synthesis failed for belief %s", belief_id)
 
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
+    from sauron.executor import submit_background_job
+    submit_background_job(_run)
     logger.info("Queued re-synthesis for belief %s (trigger: %s)", belief_id, trigger_correction_id)
