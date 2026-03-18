@@ -1,6 +1,7 @@
 """Add dotenv loading to sauron/text/__init__.py so all text modules have API key."""
 
-INIT_PATH = "/Users/stephen/Documents/Website/Sauron/sauron/text/__init__.py"
+from sauron.config import BASE_DIR
+INIT_PATH = str(BASE_DIR / "sauron" / "text" / "__init__.py")
 
 with open(INIT_PATH, "r") as f:
     content = f.read()
