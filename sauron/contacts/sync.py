@@ -6,6 +6,7 @@ so that casual references ("my brother", "his wife") can be auto-resolved.
 
 import json
 import logging
+import os
 import uuid
 
 import httpx
@@ -14,6 +15,10 @@ from sauron.config import NETWORKING_APP_URL
 from sauron.db.connection import get_connection
 
 logger = logging.getLogger(__name__)
+
+def _na_headers() -> dict:
+    key = os.environ.get("NETWORKING_APP_API_KEY", "")
+    return {"X-API-Key": key} if key else {}
 
 TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
@@ -35,6 +40,7 @@ def sync_contacts_from_networking_app() -> dict:
         resp = httpx.get(
             f"{NETWORKING_APP_URL}/api/contacts",
             params={"limit": 500},
+            headers=_na_headers(),
             timeout=TIMEOUT,
         )
         if resp.status_code != 200:
@@ -184,6 +190,7 @@ def _sync_affiliations(conn) -> dict:
             resp = httpx.get(
                 f"{NETWORKING_APP_URL}/api/contact-affiliations",
                 params={"contactId": nc_id},
+                headers=_na_headers(),
                 timeout=TIMEOUT,
             )
             if resp.status_code != 200:

@@ -1,6 +1,7 @@
 """sauron/api/provisional_orgs_api.py — CRUD for provisional org suggestions."""
 import json
 import logging
+import os
 import sqlite3
 
 from sauron.db.connection import get_connection
@@ -13,6 +14,10 @@ from pydantic import BaseModel
 from sauron.config import DB_PATH, NETWORKING_APP_URL
 
 logger = logging.getLogger(__name__)
+
+def _na_headers() -> dict:
+    key = os.environ.get("NETWORKING_APP_API_KEY", "")
+    return {"X-API-Key": key} if key else {}
 router = APIRouter()
 
 
@@ -129,6 +134,7 @@ def search_networking_orgs(q: str = Query(..., min_length=1)):
         resp = httpx.get(
             f"{NETWORKING_APP_URL}/api/organizations",
             params={"q": q},
+            headers=_na_headers(),
             timeout=TIMEOUT,
         )
         if resp.status_code >= 300:
@@ -182,6 +188,7 @@ def approve_provisional_org(suggestion_id: str, body: ApproveRequest = ApproveRe
             resp = httpx.post(
                 f"{NETWORKING_APP_URL}/api/organizations",
                 json=create_payload,
+                headers=_na_headers(),
                 timeout=TIMEOUT,
             )
             if resp.status_code >= 300:

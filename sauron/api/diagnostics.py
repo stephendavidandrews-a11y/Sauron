@@ -9,6 +9,7 @@ Provides observability into:
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 
 import httpx
@@ -125,10 +126,12 @@ def routing_detail():
 def _check_database():
     try:
         conn = get_connection()
-        conn.execute("SELECT 1")
-        count = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
-        conn.close()
-        return {"status": "ok", "conversations": count}
+        try:
+            conn.execute("SELECT 1")
+            count = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+            return {"status": "ok", "conversations": count}
+        finally:
+            conn.close()
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
@@ -172,7 +175,9 @@ def _check_dependencies():
     deps = {}
     # Networking App
     try:
-        r = httpx.get(f"{NETWORKING_APP_URL}/api/health", timeout=3.0)
+        _key = os.environ.get("NETWORKING_APP_API_KEY", "")
+        _hdrs = {"X-API-Key": _key} if _key else {}
+        r = httpx.get(f"{NETWORKING_APP_URL}/api/health", headers=_hdrs, timeout=3.0)
         deps["networking_app"] = {
             "status": "ok" if r.status_code == 200 else "degraded",
             "response_code": r.status_code,

@@ -46,16 +46,18 @@ async def list_pending_contacts():
     from sauron.db.connection import get_connection
     try:
         conn = get_connection()
-        cursor = conn.execute(
-            """SELECT id, phone, display_name, source, first_seen_at,
-                      last_seen_at, message_count, thread_ids, status
-               FROM pending_contacts
-               ORDER BY
-                   CASE status WHEN 'pending' THEN 0 WHEN 'deferred' THEN 1 ELSE 2 END,
-                   message_count DESC"""
-        )
-        results = [dict(row) for row in cursor]
-        conn.close()
+        try:
+            cursor = conn.execute(
+                """SELECT id, phone, display_name, source, first_seen_at,
+                          last_seen_at, message_count, thread_ids, status
+                   FROM pending_contacts
+                   ORDER BY
+                       CASE status WHEN 'pending' THEN 0 WHEN 'deferred' THEN 1 ELSE 2 END,
+                       message_count DESC"""
+            )
+            results = [dict(row) for row in cursor]
+        finally:
+            conn.close()
         return results
     except Exception as e:
         logger.exception("Failed to list pending contacts")

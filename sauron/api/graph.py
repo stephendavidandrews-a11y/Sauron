@@ -5,6 +5,7 @@ V8: Added provisional contact triage endpoints (list, link, confirm, dismiss).
 
 import json
 import logging
+import os
 import uuid
 
 
@@ -30,6 +31,10 @@ from sauron.db.connection import get_connection
 from sauron.api.relational_terms import RELATIONAL_TERMS, PLURAL_TERMS, ALL_TERMS
 
 logger = logging.getLogger(__name__)
+
+def _na_headers() -> dict:
+    key = os.environ.get("NETWORKING_APP_API_KEY", "")
+    return {"X-API-Key": key} if key else {}
 router = APIRouter(prefix="/graph", tags=["graph"])
 
 
@@ -760,6 +765,7 @@ def confirm_provisional_contact(contact_id: str, request: ProvisionalConfirmRequ
                 resp = httpx.post(
                     f"{NETWORKING_APP_URL}/api/contacts",
                     json={"name": final_name},
+                    headers=_na_headers(),
                     timeout=10,
                 )
                 if resp.status_code in (200, 201):
@@ -903,6 +909,7 @@ def create_contact(request: CreateContactRequest):
                 resp = httpx.post(
                     f"{NETWORKING_APP_URL}/api/contacts",
                     json=payload,
+                    headers=_na_headers(),
                     timeout=10,
                 )
                 if resp.status_code in (200, 201):
@@ -1083,6 +1090,7 @@ def _validate_networking_app_contact(networking_app_contact_id: str) -> dict:
         from sauron.config import NETWORKING_APP_URL
         resp = httpx.get(
             f"{NETWORKING_APP_URL}/api/contacts/{networking_app_contact_id}",
+            headers=_na_headers(),
             timeout=5,
         )
         if resp.status_code == 200:

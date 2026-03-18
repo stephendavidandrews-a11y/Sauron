@@ -415,228 +415,231 @@ def analyze_corrections_and_amend() -> str | None:
         The new amendment text, or None if insufficient corrections.
     """
     conn = get_connection()
-    corrections = _get_unprocessed_corrections(conn)
+    try:
+        corrections = _get_unprocessed_corrections(conn)
 
-    if not corrections:
-        logger.info("No unprocessed corrections found.")
-        return None
+        if not corrections:
+            logger.info("No unprocessed corrections found.")
+            return None
 
-    result = _group_corrections(corrections)
-    weighted_counts = result["weighted_counts"]
-    groups = result["groups"]
+        result = _group_corrections(corrections)
+        weighted_counts = result["weighted_counts"]
+        groups = result["groups"]
 
-    # Generalization gating: use weighted counts for threshold comparison
-    actionable_groups: dict[str, list[dict]] = {}
-    for k, raw_group in groups.items():
-        threshold = _FAST_THRESHOLD if k in _FAST_TYPES else _SLOW_THRESHOLD
-        weighted = weighted_counts.get(k, 0)
-        if weighted >= threshold:
-            actionable_groups[k] = raw_group
+        # Generalization gating: use weighted counts for threshold comparison
+        actionable_groups: dict[str, list[dict]] = {}
+        for k, raw_group in groups.items():
+            threshold = _FAST_THRESHOLD if k in _FAST_TYPES else _SLOW_THRESHOLD
+            weighted = weighted_counts.get(k, 0)
+            if weighted >= threshold:
+                actionable_groups[k] = raw_group
 
-    if not actionable_groups:
-        logger.info(
-            "Found %d corrections across %d patterns, but none meet their "
-            "generalization threshold (weighted). Fast types need %.1f, others need %.1f.",
-            len(corrections), len(groups), _FAST_THRESHOLD, _SLOW_THRESHOLD,
-        )
-        return None
-
-    # Compute amendment effectiveness (Feature 2)
-    effectiveness_data = _compute_amendment_effectiveness(conn)
-
-    # Detect stale rules (Feature 3)
-    staleness_data = _detect_stale_rules(conn)
-
-    # Get the current active amendment for context
-    current_amendment = get_active_amendment() or "(No existing amendment)"
-    current_version_num = _get_current_version_number(conn)
-    new_version_num = current_version_num + 1
-    new_version_str = f"v{new_version_num}"
-
-    # Build the pattern summary for Claude
-    pattern_descriptions: list[str] = []
-    all_correction_ids: list[str] = []
-
-    for correction_type, group_corrections in actionable_groups.items():
-        all_correction_ids.extend(c["id"] for c in group_corrections)
-        weighted = weighted_counts.get(correction_type, len(group_corrections))
-
-        examples: list[str] = []
-        for c in group_corrections[:5]:  # Show up to 5 examples per pattern
-            orig = c.get("original_value", "")
-            corrected = c.get("corrected_value", "")
-            if isinstance(orig, str) and len(orig) > 200:
-                orig = orig[:200] + "..."
-            if isinstance(corrected, str) and len(corrected) > 200:
-                corrected = corrected[:200] + "..."
-            examples.append(
-                f"    original: {orig}\n    corrected: {corrected}"
+        if not actionable_groups:
+            logger.info(
+                "Found %d corrections across %d patterns, but none meet their "
+                "generalization threshold (weighted). Fast types need %.1f, others need %.1f.",
+                len(corrections), len(groups), _FAST_THRESHOLD, _SLOW_THRESHOLD,
             )
+            return None
 
-        pattern_descriptions.append(
-            f"Pattern: [{correction_type}] "
-            f"({len(group_corrections)} raw corrections, "
-            f"{weighted:.1f} weighted)\n"
-            + "\n  ---\n".join(examples)
-        )
+        # Compute amendment effectiveness (Feature 2)
+        effectiveness_data = _compute_amendment_effectiveness(conn)
 
-    patterns_text = "\n\n".join(pattern_descriptions)
+        # Detect stale rules (Feature 3)
+        staleness_data = _detect_stale_rules(conn)
 
-    # Build effectiveness section (Feature 2)
-    effectiveness_text = ""
-    if effectiveness_data:
-        eff_lines = []
-        for eff in effectiveness_data:
-            status_note = ""
-            if eff["effectiveness"] == "ineffective":
-                status_note = " ⚠ This rule is NOT reducing errors. REVISE or REMOVE it."
-            elif eff["effectiveness"] == "effective":
-                status_note = " ✓ This rule is working. PRESERVE it."
-            elif eff["effectiveness"] == "insufficient_data":
-                status_note = " Not enough data to evaluate. PRESERVE for now."
-            elif eff["effectiveness"] == "mixed":
-                status_note = " Mixed results. Consider REVISING."
-            eff_lines.append(
-                f"  - {eff['error_type']}: {eff['corrections_before']} corrections before rule, "
-                f"{eff['corrections_after']} after ({eff['period_days']}d). "
-                f"{eff['effectiveness'].upper()}.{status_note}"
-            )
-        effectiveness_text = "\n\nEFFECTIVENESS OF CURRENT RULES:\n" + "\n".join(eff_lines)
+        # Get the current active amendment for context
+        current_amendment = get_active_amendment() or "(No existing amendment)"
+        current_version_num = _get_current_version_number(conn)
+        new_version_num = current_version_num + 1
+        new_version_str = f"v{new_version_num}"
 
-    # Build staleness section (Feature 3)
-    staleness_text = ""
-    if staleness_data:
-        stale_lines = []
-        for s in staleness_data:
-            status_note = ""
-            if s["rule_status"] == "stale":
-                status_note = (
-                    " No corrections of this type in 60+ days. "
-                    "Consider REMOVING this rule to reduce prompt size, "
-                    "or CONSOLIDATING it with other rules."
+        # Build the pattern summary for Claude
+        pattern_descriptions: list[str] = []
+        all_correction_ids: list[str] = []
+
+        for correction_type, group_corrections in actionable_groups.items():
+            all_correction_ids.extend(c["id"] for c in group_corrections)
+            weighted = weighted_counts.get(correction_type, len(group_corrections))
+
+            examples: list[str] = []
+            for c in group_corrections[:5]:  # Show up to 5 examples per pattern
+                orig = c.get("original_value", "")
+                corrected = c.get("corrected_value", "")
+                if isinstance(orig, str) and len(orig) > 200:
+                    orig = orig[:200] + "..."
+                if isinstance(corrected, str) and len(corrected) > 200:
+                    corrected = corrected[:200] + "..."
+                examples.append(
+                    f"    original: {orig}\n    corrected: {corrected}"
                 )
-            elif s["rule_status"] == "possibly_stale":
-                status_note = " No corrections in 30-60 days. Monitor."
-            stale_lines.append(
-                f"  - {s['error_type']}: Last correction {s['days_since_last_correction']}d ago. "
-                f"{s['rule_status'].upper()}.{status_note}"
+
+            pattern_descriptions.append(
+                f"Pattern: [{correction_type}] "
+                f"({len(group_corrections)} raw corrections, "
+                f"{weighted:.1f} weighted)\n"
+                + "\n  ---\n".join(examples)
             )
-        staleness_text = "\n\nRULE STALENESS:\n" + "\n".join(stale_lines)
 
-    # Determine display threshold for prompt
-    display_threshold = f"{_FAST_THRESHOLD}+ (fast types) or {_SLOW_THRESHOLD}+ (standard types) weighted occurrences"
+        patterns_text = "\n\n".join(pattern_descriptions)
 
-    prompt = f"""You are maintaining a prompt amendment for an AI extraction system that
-processes conversation transcripts. Users correct extraction errors, and you
-synthesise those corrections into clear rules that prevent future mistakes.
+        # Build effectiveness section (Feature 2)
+        effectiveness_text = ""
+        if effectiveness_data:
+            eff_lines = []
+            for eff in effectiveness_data:
+                status_note = ""
+                if eff["effectiveness"] == "ineffective":
+                    status_note = " ⚠ This rule is NOT reducing errors. REVISE or REMOVE it."
+                elif eff["effectiveness"] == "effective":
+                    status_note = " ✓ This rule is working. PRESERVE it."
+                elif eff["effectiveness"] == "insufficient_data":
+                    status_note = " Not enough data to evaluate. PRESERVE for now."
+                elif eff["effectiveness"] == "mixed":
+                    status_note = " Mixed results. Consider REVISING."
+                eff_lines.append(
+                    f"  - {eff['error_type']}: {eff['corrections_before']} corrections before rule, "
+                    f"{eff['corrections_after']} after ({eff['period_days']}d). "
+                    f"{eff['effectiveness'].upper()}.{status_note}"
+                )
+            effectiveness_text = "\n\nEFFECTIVENESS OF CURRENT RULES:\n" + "\n".join(eff_lines)
 
-IMPORTANT: Not every fix is a prompt fix. For each pattern, classify it into one of four buckets:
-A. PROMPT FIX — Model misunderstands instructions. Tighten extraction rules/examples.
-B. SCHEMA FIX — Data model is too crude. Suggest field or state additions.
-C. THRESHOLD FIX — Logic is okay but trigger levels are off. Suggest rule changes.
-D. UI/WORKFLOW FIX — Model may be okay but review is too hard. Suggest UI improvements.
+        # Build staleness section (Feature 3)
+        staleness_text = ""
+        if staleness_data:
+            stale_lines = []
+            for s in staleness_data:
+                status_note = ""
+                if s["rule_status"] == "stale":
+                    status_note = (
+                        " No corrections of this type in 60+ days. "
+                        "Consider REMOVING this rule to reduce prompt size, "
+                        "or CONSOLIDATING it with other rules."
+                    )
+                elif s["rule_status"] == "possibly_stale":
+                    status_note = " No corrections in 30-60 days. Monitor."
+                stale_lines.append(
+                    f"  - {s['error_type']}: Last correction {s['days_since_last_correction']}d ago. "
+                    f"{s['rule_status'].upper()}.{status_note}"
+                )
+            staleness_text = "\n\nRULE STALENESS:\n" + "\n".join(stale_lines)
 
-For each pattern, state which bucket it falls into. Only write prompt amendments for bucket A.
-For buckets B/C/D, describe the recommended fix but don't write prompt rules for them.
+        # Determine display threshold for prompt
+        display_threshold = f"{_FAST_THRESHOLD}+ (fast types) or {_SLOW_THRESHOLD}+ (standard types) weighted occurrences"
 
-CURRENT AMENDMENT (v{current_version_num}):
-{current_amendment}
-{effectiveness_text}
-{staleness_text}
+        prompt = f"""You are maintaining a prompt amendment for an AI extraction system that
+    processes conversation transcripts. Users correct extraction errors, and you
+    synthesise those corrections into clear rules that prevent future mistakes.
 
-NEW CORRECTION PATTERNS (each with {display_threshold}):
-{patterns_text}
+    IMPORTANT: Not every fix is a prompt fix. For each pattern, classify it into one of four buckets:
+    A. PROMPT FIX — Model misunderstands instructions. Tighten extraction rules/examples.
+    B. SCHEMA FIX — Data model is too crude. Suggest field or state additions.
+    C. THRESHOLD FIX — Logic is okay but trigger levels are off. Suggest rule changes.
+    D. UI/WORKFLOW FIX — Model may be okay but review is too hard. Suggest UI improvements.
 
-Generate an UPDATED amendment (v{new_version_num}) that:
-1. Preserves all existing rules from the current amendment that are still valid
-2. REMOVES or REVISES rules marked as INEFFECTIVE or STALE above
-3. Adds new rules based on the correction patterns above
-4. Uses clear, imperative language (e.g., "Treat X as Y", "Do not classify Z as...")
-5. Includes specific examples where helpful
-6. Groups related rules under clear headings
+    For each pattern, state which bucket it falls into. Only write prompt amendments for bucket A.
+    For buckets B/C/D, describe the recommended fix but don't write prompt rules for them.
 
-Format: plain text with section headers. Keep each rule concise (1-2 sentences).
-Do NOT include any preamble — start directly with the amendment text.
+    CURRENT AMENDMENT (v{current_version_num}):
+    {current_amendment}
+    {effectiveness_text}
+    {staleness_text}
 
-The amendment will be prepended to extraction prompts, so write it as
-direct instructions to the extraction model."""
+    NEW CORRECTION PATTERNS (each with {display_threshold}):
+    {patterns_text}
 
-    client = _get_client()
-    response = client.messages.create(
-        model=_AMENDMENT_MODEL,
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    Generate an UPDATED amendment (v{new_version_num}) that:
+    1. Preserves all existing rules from the current amendment that are still valid
+    2. REMOVES or REVISES rules marked as INEFFECTIVE or STALE above
+    3. Adds new rules based on the correction patterns above
+    4. Uses clear, imperative language (e.g., "Treat X as Y", "Do not classify Z as...")
+    5. Includes specific examples where helpful
+    6. Groups related rules under clear headings
 
-    amendment_text = response.content[0].text.strip() if response.content else ""
+    Format: plain text with section headers. Keep each rule concise (1-2 sentences).
+    Do NOT include any preamble — start directly with the amendment text.
 
-    if not amendment_text:
-        logger.error("Claude returned empty amendment text.")
-        return None
+    The amendment will be prepended to extraction prompts, so write it as
+    direct instructions to the extraction model."""
 
-    # Deactivate old amendments
-    conn.execute("UPDATE prompt_amendments SET active = FALSE WHERE active = TRUE")
+        client = _get_client()
+        response = client.messages.create(
+            model=_AMENDMENT_MODEL,
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
 
-    # A3: Parse A/B/C/D bucket classifications from amendment output
-    bucket_classifications = {}
-    for line in amendment_text.split("\n"):
-        line_stripped = line.strip()
-        for bucket in ["A", "B", "C", "D"]:
-            # Match patterns like "Bucket A:", "[A]", "A. PROMPT FIX", "A:"
-            if (line_stripped.startswith(f"Bucket {bucket}:")
-                    or line_stripped.startswith(f"[{bucket}]")
-                    or line_stripped.startswith(f"{bucket}. ")
-                    or line_stripped.startswith(f"{bucket}:")):
-                # Extract the pattern name if present
-                for pattern_key in actionable_groups:
-                    if pattern_key.lower() in line_stripped.lower():
-                        bucket_classifications[pattern_key] = bucket
-                        break
+        amendment_text = response.content[0].text.strip() if response.content else ""
 
-    # Build source_analysis JSON that stores the correction_ids and
-    # patterns_addressed (since those columns don't exist on the table).
-    source_analysis_json = json.dumps({
-        "correction_ids": all_correction_ids,
-        "patterns_addressed": list(actionable_groups.keys()),
-        "correction_count": len(all_correction_ids),
-        "weighted_counts": {k: round(v, 2) for k, v in weighted_counts.items()
-                           if k in actionable_groups},
-        "effectiveness_snapshot": effectiveness_data,
-        "staleness_snapshot": staleness_data,
-        "bucket_classifications": bucket_classifications,
-    })
+        if not amendment_text:
+            logger.error("Claude returned empty amendment text.")
+            return None
 
-    # Insert new amendment
-    amendment_id = str(uuid.uuid4())
-    conn.execute(
-        """
-        INSERT INTO prompt_amendments
-            (id, version, amendment_text, source_analysis,
-             correction_count, active, created_at)
-        VALUES (?, ?, ?, ?, ?, TRUE, ?)
-        """,
-        (
-            amendment_id,
+        # Deactivate old amendments
+        conn.execute("UPDATE prompt_amendments SET active = FALSE WHERE active = TRUE")
+
+        # A3: Parse A/B/C/D bucket classifications from amendment output
+        bucket_classifications = {}
+        for line in amendment_text.split("\n"):
+            line_stripped = line.strip()
+            for bucket in ["A", "B", "C", "D"]:
+                # Match patterns like "Bucket A:", "[A]", "A. PROMPT FIX", "A:"
+                if (line_stripped.startswith(f"Bucket {bucket}:")
+                        or line_stripped.startswith(f"[{bucket}]")
+                        or line_stripped.startswith(f"{bucket}. ")
+                        or line_stripped.startswith(f"{bucket}:")):
+                    # Extract the pattern name if present
+                    for pattern_key in actionable_groups:
+                        if pattern_key.lower() in line_stripped.lower():
+                            bucket_classifications[pattern_key] = bucket
+                            break
+
+        # Build source_analysis JSON that stores the correction_ids and
+        # patterns_addressed (since those columns don't exist on the table).
+        source_analysis_json = json.dumps({
+            "correction_ids": all_correction_ids,
+            "patterns_addressed": list(actionable_groups.keys()),
+            "correction_count": len(all_correction_ids),
+            "weighted_counts": {k: round(v, 2) for k, v in weighted_counts.items()
+                               if k in actionable_groups},
+            "effectiveness_snapshot": effectiveness_data,
+            "staleness_snapshot": staleness_data,
+            "bucket_classifications": bucket_classifications,
+        })
+
+        # Insert new amendment
+        amendment_id = str(uuid.uuid4())
+        conn.execute(
+            """
+            INSERT INTO prompt_amendments
+                (id, version, amendment_text, source_analysis,
+                 correction_count, active, created_at)
+            VALUES (?, ?, ?, ?, ?, TRUE, ?)
+            """,
+            (
+                amendment_id,
+                new_version_str,
+                amendment_text,
+                source_analysis_json,
+                len(all_correction_ids),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+        conn.commit()
+        logger.info(
+            "Generated amendment %s from %d corrections across %d patterns "
+            "(EMA-weighted, effectiveness=%d rules tracked, stale=%d rules checked).",
             new_version_str,
-            amendment_text,
-            source_analysis_json,
             len(all_correction_ids),
-            datetime.now(timezone.utc).isoformat(),
-        ),
-    )
+            len(actionable_groups),
+            len(effectiveness_data),
+            len(staleness_data),
+        )
 
-    conn.commit()
-    logger.info(
-        "Generated amendment %s from %d corrections across %d patterns "
-        "(EMA-weighted, effectiveness=%d rules tracked, stale=%d rules checked).",
-        new_version_str,
-        len(all_correction_ids),
-        len(actionable_groups),
-        len(effectiveness_data),
-        len(staleness_data),
-    )
-
-    return amendment_text
+        return amendment_text
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +657,7 @@ def get_contact_preferences(contact_id: str) -> dict | None:
         """,
         (contact_id,),
     ).fetchone()
+    conn.close()
     return dict(row) if row else None
 
 
@@ -722,6 +726,7 @@ def update_contact_preference(
         )
 
     conn.commit()
+    conn.close()
     logger.info(
         "Updated preference %s=%s for contact %s", field, value, contact_id
     )
@@ -754,6 +759,8 @@ def _get_amendment_for_pass(pass_name: str) -> str | None:
     except Exception:
         # Column doesn't exist yet — fall back to global
         return None
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -796,60 +803,63 @@ def build_extraction_context(conversation_id: str, pass_name: str = "claims") ->
 
     # --- Per-contact preferences ---
     conn = get_connection()
+    try:
 
-    # Find all contacts who participated in this conversation
-    # transcripts uses speaker_id, not speaker_contact_id
-    participants = conn.execute(
-        """
-        SELECT DISTINCT t.speaker_id
-        FROM transcripts t
-        WHERE t.conversation_id = ?
-          AND t.speaker_id IS NOT NULL
-        """,
-        (conversation_id,),
-    ).fetchall()
+        # Find all contacts who participated in this conversation
+        # transcripts uses speaker_id, not speaker_contact_id
+        participants = conn.execute(
+            """
+            SELECT DISTINCT t.speaker_id
+            FROM transcripts t
+            WHERE t.conversation_id = ?
+              AND t.speaker_id IS NOT NULL
+            """,
+            (conversation_id,),
+        ).fetchall()
 
-    contact_prefs_parts: list[str] = []
-    for row in participants:
-        cid = row["speaker_id"]
-        prefs = get_contact_preferences(cid)
-        if not prefs:
-            continue
-
-        # Get the contact name for readability
-        # unified_contacts uses canonical_name, not display_name
-        contact = conn.execute(
-            "SELECT canonical_name FROM unified_contacts WHERE id = ?",
-            (cid,),
-        ).fetchone()
-        name = (contact["canonical_name"] if contact else None) or cid
-
-        # Build a human-readable preference block
-        pref_lines: list[str] = []
-        for key, val in prefs.items():
-            if key in ("id", "contact_id", "created_at", "last_updated"):
+        contact_prefs_parts: list[str] = []
+        for row in participants:
+            cid = row["speaker_id"]
+            prefs = get_contact_preferences(cid)
+            if not prefs:
                 continue
-            if val is None:
-                continue
-            # Try to de-serialise JSON strings for readability
-            if isinstance(val, str):
-                try:
-                    val = json.loads(val)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            pref_lines.append(f"  {key}: {val}")
 
-        if pref_lines:
-            contact_prefs_parts.append(
-                f"Contact-specific rules for {name}:\n"
-                + "\n".join(pref_lines)
+            # Get the contact name for readability
+            # unified_contacts uses canonical_name, not display_name
+            contact = conn.execute(
+                "SELECT canonical_name FROM unified_contacts WHERE id = ?",
+                (cid,),
+            ).fetchone()
+            name = (contact["canonical_name"] if contact else None) or cid
+
+            # Build a human-readable preference block
+            pref_lines: list[str] = []
+            for key, val in prefs.items():
+                if key in ("id", "contact_id", "created_at", "last_updated"):
+                    continue
+                if val is None:
+                    continue
+                # Try to de-serialise JSON strings for readability
+                if isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                pref_lines.append(f"  {key}: {val}")
+
+            if pref_lines:
+                contact_prefs_parts.append(
+                    f"Contact-specific rules for {name}:\n"
+                    + "\n".join(pref_lines)
+                )
+
+        if contact_prefs_parts:
+            parts.append(
+                "=== CONTACT-SPECIFIC PREFERENCES ===\n"
+                + "\n\n".join(contact_prefs_parts) + "\n"
+                "=== END CONTACT PREFERENCES ==="
             )
 
-    if contact_prefs_parts:
-        parts.append(
-            "=== CONTACT-SPECIFIC PREFERENCES ===\n"
-            + "\n\n".join(contact_prefs_parts) + "\n"
-            "=== END CONTACT PREFERENCES ==="
-        )
-
-    return "\n\n".join(parts)
+        return "\n\n".join(parts)
+    finally:
+        conn.close()
