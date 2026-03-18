@@ -410,6 +410,9 @@ def run_migration(db_path: Path = DB_PATH) -> None:
         # v27: Audit Wave 1 indexes
         _run_v27_audit_indexes(conn)
 
+        # v28: Commitments tracker columns
+        _run_v28_commitments_tracker(conn)
+
         conn.commit()
 
         logger.info("[MIGRATION] All migrations complete.")
@@ -1216,3 +1219,21 @@ def _run_v27_audit_indexes(conn):
 
     conn.commit()
     logger.info("v27 migration complete.")
+
+
+def _run_v28_commitments_tracker(conn):
+    """v28: Add tracker_status + snoozed_until columns to event_claims for Commitments tab."""
+    added = 0
+    if _add_column_safe(conn, "event_claims", "tracker_status", "TEXT DEFAULT 'open'"):
+        added += 1
+    if _add_column_safe(conn, "event_claims", "snoozed_until", "TEXT"):
+        added += 1
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_event_claims_tracker_status ON event_claims(tracker_status);
+        CREATE INDEX IF NOT EXISTS idx_event_claims_commitment_dir ON event_claims(claim_type, direction, tracker_status);
+    """)
+    if added:
+        logger.info(f"v28: Added {added} commitments tracker columns + indexes")
+    else:
+        logger.info("v28: Commitments tracker columns already present")
+    conn.commit()

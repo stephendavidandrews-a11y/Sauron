@@ -30,6 +30,7 @@ dependencies = [
     "google-auth>=2.0.0",
     "google-api-python-client>=2.0.0",
     "python-multipart>=0.0.9",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { safeCall, friendlyError } from '../utils/apiResult';
+import { useToast } from '../components/StatusToast';
 import { fetchPendingRoutes, fetchProvisionalOrgs } from '../api';
 import { C } from "../utils/colors";
 import { relativeTime } from "../utils/time";
@@ -45,7 +47,8 @@ export default function Review() {
   const handleDiscardConversation = async (convId) => {
     if (!window.confirm('Discard this conversation?')) return;
     try {
-      await api.discardConversation(convId);
+      const result = await safeCall(() => api.discardConversation(convId));
+      if (!result.ok) { toast.error(friendlyError(result)); return; }
       loadData();
     } catch (e) {
       console.error('Discard failed:', e);
@@ -88,12 +91,16 @@ export default function Review() {
     .slice(0, 10);
 
   const handlePromote = async (id) => {
-    await api.promoteTriage(id);
+    const result = await safeCall(() => api.promoteTriage(id));
+    if (!result.ok) { toast.error(friendlyError(result)); return; }
+    toast.success('Promoted to full extraction');
     loadData();
   };
 
   const handleArchive = async (id) => {
-    await api.archiveTriage(id);
+    const result = await safeCall(() => api.archiveTriage(id));
+    if (!result.ok) { toast.error(friendlyError(result)); return; }
+    toast.success('Archived');
     loadData();
   };
 

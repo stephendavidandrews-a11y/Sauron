@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
+import { safeCall, friendlyError } from '../utils/apiResult';
+import { useToast } from '../components/StatusToast';
 import { fetchRoutingSummary, fetchPendingRoutes } from '../api';
 import TextReplaceCascade from '../components/TextReplaceCascade';
 import { C } from "../utils/colors";
@@ -69,6 +71,7 @@ function RoutingChip({ summary, expanded, onToggle }) {
 
 export default function ConversationDetail() {
   const { id } = useParams();
+  const toast = useToast();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -133,10 +136,14 @@ export default function ConversationDetail() {
 
   const handleReprocess = async () => {
     setReprocessing(true);
-    try {
-      await api.pipelineProcess(id);
+    const result = await safeCall(() => api.pipelineProcess(id));
+    if (result.ok) {
+      toast.info('Reprocessing started — reloading in 2s');
       setTimeout(() => { reload(); setReprocessing(false); }, 2000);
-    } catch { setReprocessing(false); }
+    } else {
+      toast.error('Reprocess failed: ' + friendlyError(result));
+      setReprocessing(false);
+    }
   };
 
   const handleMarkReviewed = async () => {
@@ -158,11 +165,11 @@ export default function ConversationDetail() {
   const handleDiscard = async () => {
     if (!window.confirm('Discard this conversation? It will be removed from all review queues.')) return;
     setDiscarding(true);
-    try {
-      await api.discardConversation(id, 'discarded_from_review');
+    const discardResult = await safeCall(() => api.discardConversation(id, 'discarded_from_review'));
+    if (discardResult.ok) {
       window.location.href = '/review';
-    } catch (e) {
-      console.error('Failed to discard:', e);
+    } else {
+      toast.error('Discard failed: ' + friendlyError(discardResult));
       setDiscarding(false);
     }
   };

@@ -33,3 +33,4 @@ temp_*.py
 eval_results.json
 patch_*.py
 eval_*.py
+frontend/.env

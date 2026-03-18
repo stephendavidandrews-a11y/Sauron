@@ -7,6 +7,7 @@ const navItems = [
   { path: '/prep', label: 'Prep' },
   { path: '/review', label: 'Review' },
   { path: '/search', label: 'Search' },
+  { path: '/commitments', label: 'Commitments' },
   { path: '/learning', label: 'Learning' },
   { path: '/upload', label: 'Upload' },
 ];

@@ -14,7 +14,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile, File, Form
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from sauron.config import (
     INBOX_PI, INBOX_PLAUD, INBOX_IPHONE_DIR, INBOX_EMAIL_DIR,
@@ -43,7 +45,7 @@ async def ingest_existing_files(source: str = None):
         source: Optional filter — 'pi', 'plaud', 'iphone', 'email'. If None, scan all.
     """
     if source and source not in INBOX_SOURCES:
-        return {"error": f"Unknown source: {source}. Use: {list(INBOX_SOURCES.keys())}"}
+        raise HTTPException(status_code=400, detail=f"Unknown source: {source}. Use: {list(INBOX_SOURCES.keys())}")
 
     sources = {source: INBOX_SOURCES[source]} if source else INBOX_SOURCES
     registered = []
@@ -117,6 +119,7 @@ async def ingest_existing_files(source: str = None):
 
 @router.post("/upload")
 async def upload_recording(
+    request: Request,
     file: UploadFile = File(...),
     source: str = Form("iphone"),
     note: str = Form(None),
@@ -199,7 +202,7 @@ async def upload_recording(
         if dest.exists():
             dest.unlink()
         logger.exception("Upload DB registration failed")
-        raise HTTPException(500, f"Failed to register upload: {e}")
+        raise HTTPException(500, "Failed to register upload")
     finally:
         conn.close()
 
@@ -235,7 +238,7 @@ async def process_single(conversation_id: str, background_tasks: BackgroundTasks
         conn.close()
 
     if not row:
-        return {"error": "Conversation not found"}
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     background_tasks.add_task(process_conversation, conversation_id)
     return {
@@ -334,8 +337,7 @@ def confirm_speakers(conversation_id: str):
     def _run():
         try:
             process_extraction(conversation_id)
-        except Exception as e:
-            import logging
+        except Exception:
             logging.getLogger(__name__).exception(f"Extraction failed for {conversation_id}")
 
     t = threading.Thread(target=_run, daemon=True)
@@ -372,8 +374,7 @@ def promote_triage(conversation_id: str):
     def _run():
         try:
             process_extraction_skip_triage(conversation_id)
-        except Exception as e:
-            import logging
+        except Exception:
             logging.getLogger(__name__).exception(f"Promoted extraction failed for {conversation_id}")
 
     t = threading.Thread(target=_run, daemon=True)
@@ -507,8 +508,7 @@ async def retry_failed_routes(background_tasks: BackgroundTasks):
                     )
                     conn.commit()
                     results["failed"] += 1
-            except Exception as e:
-                import logging
+            except Exception:
                 logging.getLogger(__name__).exception(
                     f"Retry failed for conversation {route['conversation_id'][:8]}"
                 )
@@ -516,7 +516,6 @@ async def retry_failed_routes(background_tasks: BackgroundTasks):
             finally:
                 conn.close()
 
-        import logging
         logging.getLogger(__name__).info(
             f"Retry complete: {results['success']} succeeded, {results['failed']} failed"
         )

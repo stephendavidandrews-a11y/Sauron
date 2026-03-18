@@ -28,7 +28,6 @@ AUDIO_ANALYZER_PORT = 5050
 
 # ── Downstream Services ──
 NETWORKING_APP_URL = "http://localhost:3000"
-CFTC_APP_URL = "http://localhost:8000"
 
 # ── Whisper ──
 WHISPER_MODEL = "medium.en"

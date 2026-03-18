@@ -6,12 +6,15 @@ import Today from './pages/Today';
 import Prep from './pages/Prep';
 import Review from './pages/Review';
 import Search from './pages/Search';
+import Commitments from './pages/Commitments';
 import ConversationDetail from './pages/ConversationDetail';
 import Learning from './pages/Learning';
 import SpeakerReview from './pages/SpeakerReview';
 import BeliefReview from './pages/BeliefReview';
 import Upload from './pages/Upload';
 import ErrorBoundary from './components/ErrorBoundary';
+import SystemStatusBanner from './components/SystemStatusBanner';
+import DevPanel from './components/DevPanel';
 import { api } from './api';
 
 export default function App() {
@@ -54,6 +57,8 @@ export default function App() {
       navigate('/review');
     } else if (e.key === 's' || e.key === 'S') {
       navigate('/search');
+    } else if (e.key === 'd' || e.key === 'D') {
+      navigate('/commitments');
     } else if (e.key === 'l' || e.key === 'L') {
       navigate('/learning');
     } else if (e.key === 'Escape') {
@@ -68,6 +73,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg">
+      <SystemStatusBanner />
       <NavBar
         onCommandPalette={() => setCommandPaletteOpen(true)}
         badgeCounts={badgeCounts}
@@ -85,6 +91,7 @@ export default function App() {
           <Route path="/review/:id" element={<ConversationDetail />} />
           <Route path="/conversations/:id" element={<ConversationDetail />} />
           <Route path="/search" element={<Search />} />
+          <Route path="/commitments" element={<Commitments />} />
           <Route path="/learning" element={<Learning />} />
           <Route path="/upload" element={<Upload />} />
         </Routes>
@@ -99,6 +106,7 @@ export default function App() {
           setCommandPaletteOpen(false);
         }}
       />
+      <DevPanel />
     </div>
   );
 }

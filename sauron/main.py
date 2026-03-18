@@ -3,10 +3,12 @@
 FastAPI service on port 8003. Processes audio from Pi and Plaud recorders,
 producing structured intelligence for the Networking App and CFTC Command Center.
 
-v0.3.0:
-  - Serves React frontend from frontend/dist/
-  - CORS enabled for development
-  - SPA fallback for client-side routing
+v0.3.1:
+  - API key authentication on all /api/* endpoints
+  - CORS restricted to known origins
+  - Rate limiting via slowapi
+  - Global exception handler (no info leakage)
+  - Request audit logging middleware
 """
 
 from dotenv import load_dotenv
@@ -20,16 +22,24 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from sauron.config import SAURON_PORT, LOGS_DIR
 from sauron import __version__
 from sauron.db.schema import init_db
 from sauron.pipeline.watcher import InboxWatcher
 from sauron.pipeline.processor import process_conversation, process_through_speaker_id
+from sauron.security import (
+    require_api_key,
+    global_exception_handler,
+    RequestLoggingMiddleware,
+)
 
 # Configure logging
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,6 +66,9 @@ _scheduler = None
 
 # Thread pool for pipeline processing (limits concurrent GPU-heavy work)
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sauron-pipeline")
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _on_new_file(conversation_id: str, path):
@@ -170,12 +183,27 @@ app = FastAPI(
     description="Personal Voice Intelligence System",
     version=__version__,
     lifespan=lifespan,
+    dependencies=[Depends(require_api_key)],
 )
 
-# CORS (allow dev and production origins)
+# ── Rate Limiting ──
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── Global Exception Handler (no info leakage) ──
+app.add_exception_handler(Exception, global_exception_handler)
+
+# ── Request Audit Logging ──
+app.add_middleware(RequestLoggingMiddleware)
+
+# ── CORS (restricted to known origins) ──
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://sauron.stephenandrews.org",
+        "http://localhost:5173",
+        "http://localhost:8003",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -202,6 +230,8 @@ from sauron.api.rename import router as rename_router
 from sauron.api.text_replace import router as text_replace_router
 from sauron.api.text_api import router as text_router
 from sauron.api.entities_api import router as entities_router
+from sauron.api.commitments_api import router as commitments_router
+from sauron.api.diagnostics import router as diagnostics_router
 
 app.include_router(conversations_router, prefix="/api")
 app.include_router(profiles_router, prefix="/api")
@@ -223,11 +253,13 @@ app.include_router(rename_router, prefix="/api")
 app.include_router(text_replace_router, prefix="/api")
 app.include_router(text_router, prefix="/api")
 app.include_router(entities_router, prefix="/api")
+app.include_router(commitments_router, prefix="/api")
+app.include_router(diagnostics_router, prefix="/api")
 
 
 @app.get("/api/health")
 def health_check():
-    """API health check."""
+    """API health check (no auth required)."""
     from sauron.db.connection import get_connection
     conn = get_connection()
     try:

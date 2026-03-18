@@ -1,15 +1,26 @@
+import { tripwire } from './utils/tripwires';
+
 const BASE = '/api';
 
+// API key for authenticated requests (set via VITE_SAURON_API_KEY env var at build time)
+const API_KEY = import.meta.env.VITE_SAURON_API_KEY || '';
+
 async function fetchJSON(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY;
+  }
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers,
     ...options,
   });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status}: ${text}`);
   }
-  return res.json();
+  const data = await res.json();
+  tripwire.checkForSemantic200Error(data, path);
+  return data;
 }
 
 // Cached contacts (5-minute TTL) to avoid 500-contact fetch on every page load
@@ -67,7 +78,7 @@ export const api = {
 
   // Search
   search: (query, limit = 10, sourceType = null) => {
-    let url = `/search?query=${encodeURIComponent(query)}&limit=${limit}`;
+    let url = `/search?q=${encodeURIComponent(query)}&limit=${limit}`;
     if (sourceType) url += `&source_type=${sourceType}`;
     return fetchJSON(url);
   },
@@ -293,6 +304,24 @@ export const api = {
         user_feedback: feedback,
       }),
     }),
+
+  // Commitments tracker
+  commitments: ({ direction, status, firmness, contact, limit } = {}) => {
+    const params = new URLSearchParams();
+    if (direction) params.append("direction", direction);
+    if (status) params.append("status", status);
+    if (firmness) params.append("firmness", firmness);
+    if (contact) params.append("contact", contact);
+    if (limit) params.append("limit", limit);
+    return fetchJSON(`/commitments?${params}`);
+  },
+  commitmentStats: () => fetchJSON("/commitments/stats"),
+  updateCommitmentStatus: (claimId, trackerStatus, snoozedUntil) =>
+    fetchJSON(`/commitments/${claimId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ tracker_status: trackerStatus, snoozed_until: snoozedUntil || null }),
+    }),
+
   errorTypes: () => fetchJSON('/correct/error-types'),
   correctSpeaker: (conversationId, speakerLabel, correctContactId) =>
     fetchJSON('/correct/speaker', {
@@ -436,9 +465,11 @@ export const api = {
 
   // Search telemetry
   logSearchEvent: (data) => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (API_KEY) headers['X-API-Key'] = API_KEY;
     fetch(`${BASE}/search/log`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(data),
     }).catch(() => {}); // fire and forget
   },
@@ -521,6 +552,11 @@ export const api = {
 
   routingPreview: (conversationId) =>
     fetchJSON(`/conversations/${conversationId}/routing-preview`),
+
+  // Diagnostics
+  diagnosticsStatus: () => fetchJSON('/diagnostics/status'),
+  diagnosticsPipeline: () => fetchJSON('/diagnostics/pipeline'),
+  diagnosticsRouting: () => fetchJSON('/diagnostics/routing'),
 };
 
 

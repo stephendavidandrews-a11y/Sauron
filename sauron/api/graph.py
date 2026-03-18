@@ -230,7 +230,7 @@ def trigger_contact_sync():
         stats = sync_contacts_from_networking_app()
         return {"status": "ok", **stats}
     except RuntimeError as e:
-        return {"status": "error", "detail": str(e)}
+        raise HTTPException(status_code=502, detail=f"Contact sync failed: {e}")
 
 
 @router.get("/query")
