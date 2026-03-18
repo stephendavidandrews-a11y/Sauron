@@ -348,18 +348,11 @@ def _update_contact_field_null_only(
         return None, None
 
     # GET current contact
-    try:
-        resp = httpx.get(
-            f"{NETWORKING_APP_URL}/api/contacts/{contact_id}",
-            timeout=TIMEOUT,
-        )
-        if resp.status_code >= 300:
-            return False, f"GET contact {contact_id[:8]} failed: HTTP {resp.status_code}"
-        contact = resp.json()
-    except httpx.ConnectError:
-        return False, "ConnectError: Networking app not reachable"
-    except Exception as e:
-        return False, f"GET contact failed: {e}"
+    url = f"{NETWORKING_APP_URL}/api/contacts/{contact_id}"
+    ok, err, body = _api_call("GET", url, {})
+    if not ok:
+        return False, f"GET contact {contact_id[:8]} failed: {err}"
+    contact = body
 
     # Null-only check: skip if field already has a value
     current = contact.get(net_field)

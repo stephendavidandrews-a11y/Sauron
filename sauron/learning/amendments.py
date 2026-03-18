@@ -44,7 +44,7 @@ _FAST_TYPES = {
     "bad_commitment_extraction", "overstated_position",
 }
 _FAST_THRESHOLD = 3
-_SLOW_THRESHOLD = 3
+_SLOW_THRESHOLD = 5
 _EMA_HALFLIFE_DAYS = 30
 _client: Optional[anthropic.Anthropic] = None
 
@@ -657,6 +657,13 @@ def get_contact_preferences(contact_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+_ALLOWED_PREF_FIELDS = {
+    "commitment_confidence_threshold", "typical_follow_through_rate",
+    "extraction_depth", "vocal_alert_sensitivity",
+    "relationship_importance", "custom_notes",
+}
+
+
 def update_contact_preference(
     contact_id: str, field: str, value: Any
 ) -> None:
@@ -671,7 +678,15 @@ def update_contact_preference(
         contact_extraction_preferences).
     value : Any
         The new value (will be JSON-serialised if not a simple type).
+
+    Raises
+    ------
+    ValueError
+        If *field* is not in the allowed column whitelist.
     """
+    if field not in _ALLOWED_PREF_FIELDS:
+        raise ValueError(f"Invalid preference field: {field!r}")
+
     conn = get_connection()
 
     # Check if a row exists

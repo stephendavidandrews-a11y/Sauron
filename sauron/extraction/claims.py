@@ -340,7 +340,7 @@ def extract_claims(
         # Already in an async context (e.g., FastAPI background task)
         # Create a new thread to run our event loop
         import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
                 _extract_claims_async(transcript_text, episodes, amendment_context, speaker_map, conversation_id),
