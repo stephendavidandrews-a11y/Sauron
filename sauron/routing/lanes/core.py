@@ -6,6 +6,8 @@ Extracted from sauron/routing/networking.py (stability refactor).
 import json as _json
 import logging
 
+import os
+
 import httpx
 
 from dataclasses import dataclass, field
@@ -87,15 +89,20 @@ def _api_call(
     Third element is the parsed JSON response body (dict) when available,
     used to inspect resolution details on error (e.g. provisional_suggestion).
     """
+    headers = {}
+    na_key = os.environ.get("NETWORKING_APP_API_KEY", "")
+    if na_key:
+        headers["X-API-Key"] = na_key
+
     try:
         if method == "POST":
-            resp = httpx.post(url, json=payload, timeout=TIMEOUT)
+            resp = httpx.post(url, json=payload, headers=headers, timeout=TIMEOUT)
         elif method == "PUT":
-            resp = httpx.put(url, json=payload, timeout=TIMEOUT)
+            resp = httpx.put(url, json=payload, headers=headers, timeout=TIMEOUT)
         elif method == "PATCH":
-            resp = httpx.patch(url, json=payload, timeout=TIMEOUT)
+            resp = httpx.patch(url, json=payload, headers=headers, timeout=TIMEOUT)
         elif method == "GET":
-            resp = httpx.get(url, timeout=TIMEOUT)
+            resp = httpx.get(url, headers=headers, timeout=TIMEOUT)
         else:
             return False, f"Unsupported method: {method}", None
 

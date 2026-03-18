@@ -158,8 +158,11 @@ def client(test_db_no_graph_types, monkeypatch):
     monkeypatch.setattr(conv_mod, "get_connection", get_test_connection)
     monkeypatch.setattr(people_mod, "get_connection", get_test_connection)
 
+    monkeypatch.setenv("SAURON_API_KEY", "test-key")
     from sauron.main import app
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers["X-API-Key"] = "test-key"
+    return client
 
 
 def test_people_endpoint_degrades_without_graph_types(client):
